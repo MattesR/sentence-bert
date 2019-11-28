@@ -1,22 +1,15 @@
 import os
 import time
 from tqdm import tqdm
-from email.policy import compat32
-from email import message_from_string
 from elastic import Mail
 from elasticsearch_dsl import connections
 from util.splitter import paragraph_splitter
+
 ENRON_MAIL_PATH = "../datasets/enron"
 test_path = "/home/moiddes/opt/datasets/enron/white-s/val"
+results_path= "./results"
 
 
-def parsemail(filepath):
-    """
-    parse the mail. return email object
-    """
-    with open(filepath) as fp:
-        mail = message_from_string(fp.read(), policy=compat32)
-        return mail
 
 
 """
@@ -51,9 +44,10 @@ if __name__ == "__main__":
             el_id += 1
     t_stop = time.time()
     total_time = t_stop - t_start
-    with open('out.txt', 'w') as output:
-        output.write('time needed to index the Enron Dataset into Elasticsearch using paragraph splitter')
-        output.write(total_time())
+    with open(results_path + '/elastic_walk.txt', 'w') as output:
+        output.write(f"""
+        time needed to index the Enron Dataset into Elasticsearch using paragraph splitter: {total_time} seconds 
+        """)
     print(f'all emails were processed. {falsely_parsed} mails were falsely parsed and are missing from the corpus. \n'
           f'it took {total_time} seconds to index the dataset.')
 
