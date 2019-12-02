@@ -13,7 +13,8 @@ results_path= "./results"
 
 
 """
-This function walks the enron dataset, storing all mails and metadata in elastic
+This function walks the enron dataset, storing all mails and metadata in elastic.
+The Document contains nested inner documents which are the paragraphs of the mail, split by a paragraph splitter
 """
 if __name__ == "__main__":
     t_start = time.time()

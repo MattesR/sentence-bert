@@ -1,5 +1,7 @@
+
 import os
 import time
+from datetime import datetime
 
 import psycopg2
 from tqdm import tqdm
@@ -11,7 +13,8 @@ import numpy as np
 import faiss
 result_path = './results'
 faiss_path = './faiss_indexes'
-model = SentenceTransformer('bert-base-nli-mean-tokens')
+model_name = 'bert-base-nli-mean-tokens'
+model = SentenceTransformer(model_name)
 DBNAME='enron'
 DBUSER='postgres'
 DBPASSWORD='postgres'
@@ -20,6 +23,10 @@ test_path = "/home/moiddes/opt/datasets/enron/white-s/val"
 
 
 if __name__ == "__main__":
+    """
+    This Script is reponsible for walking the enron data base path, creating database entries for all documents and
+    calculating and storing embeddings.
+    """
     t_start = time.time()
     try:
         conn = psycopg2.connect(host='localhost', database=DBNAME, user=DBUSER, password=DBPASSWORD)
@@ -46,7 +53,8 @@ if __name__ == "__main__":
                 # TODO: Make this less messy like for real that's horrible
                 unit_embedding = np.array([unit_embedding[0]])
                 id_index.add_with_ids(unit_embedding, np.array([unit_id]))
-    faiss.write_index(id_index, faiss_path + '/test_index')
+    now = datetime.now()
+    faiss.write_index(id_index, faiss_path + '/faiss_index_' + model_name + '_' + now.strftime("%d,%m,%Y %Huhr%M"))
     t_stop = time.time()
     total_time = t_stop - t_start
     with open(result_path + '/faiss_walk.txt', 'w') as output:
