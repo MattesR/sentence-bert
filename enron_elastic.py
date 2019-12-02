@@ -4,7 +4,7 @@ from tqdm import tqdm
 from elastic import Mail
 from elasticsearch_dsl import connections
 from util.splitter import paragraph_splitter
-
+from util.parser import parsemail
 ENRON_MAIL_PATH = "../datasets/enron"
 test_path = "/home/moiddes/opt/datasets/enron/white-s/val"
 results_path= "./results"
