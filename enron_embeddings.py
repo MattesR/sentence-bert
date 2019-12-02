@@ -20,6 +20,7 @@ DBUSER='postgres'
 DBPASSWORD='postgres'
 ENRON_MAIL_PATH = "../datasets/enron"
 test_path = "/home/moiddes/opt/datasets/enron/white-s/val"
+index_size = 200000
 
 
 if __name__ == "__main__":
@@ -28,6 +29,8 @@ if __name__ == "__main__":
     calculating and storing embeddings.
     """
     t_start = time.time()
+    current_index = 0
+    current_index_size = 0
     try:
         conn = psycopg2.connect(host='localhost', database=DBNAME, user=DBUSER, password=DBPASSWORD)
     except (Exception, psycopg2.DatabaseError) as error:
@@ -53,8 +56,22 @@ if __name__ == "__main__":
                 # TODO: Make this less messy like for real that's horrible
                 unit_embedding = np.array([unit_embedding[0]])
                 id_index.add_with_ids(unit_embedding, np.array([unit_id]))
+                current_index_size += 1
+                if current_index_size >= index_size:
+                    now = datetime.now()
+                    faiss.write_index(id_index, faiss_path + '/faiss_index_' + model_name + '_' + str(
+                        current_index) + '_' + now.strftime("%d,%m,%Y %Huhr%M"))
+                    print(f'written index File number {current_index} it contains {current_index_size} vectors')
+                    index = 0
+                    index = faiss.IndexFlatL2(768)
+                    id_index = 0
+                    id_index = faiss.IndexIDMap(index)
+                    current_index += 1
+                    current_index_size = 0
     now = datetime.now()
-    faiss.write_index(id_index, faiss_path + '/faiss_index_' + model_name + '_' + now.strftime("%d,%m,%Y %Huhr%M"))
+    faiss.write_index(id_index, faiss_path + '/faiss_index_' + model_name + '_' + str(
+        current_index) + '_' + now.strftime("%d,%m,%Y %Huhr%M"))
+    print(f'written final index File number {current_index} it contains {current_index_size} vectors')
     t_stop = time.time()
     total_time = t_stop - t_start
     with open(result_path + '/faiss_walk.txt', 'w') as output:
