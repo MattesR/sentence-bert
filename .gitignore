@@ -13,7 +13,7 @@ Pipfile.lock
 datasets/
 examples/
 results/
-
+faiss_indexes/
 #pycaches
 **/__pycache__/
 

@@ -6,3 +6,7 @@ faiss is used as an index in order to store the embeddings of text units.
 
 ## Datasets
 [Enron Dataset](https://www.cs.cmu.edu/~enron/enron_mail_20150507.tar.gz)
+
+## Installed packages 
+I've create a [handy Gist](https://gist.github.com/MattesR/ecb4c338bbf7b9975b025217e09e1a97) 
+in order to make it easier to install all necessary packages for the project on a new machine.
