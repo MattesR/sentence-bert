@@ -4,7 +4,6 @@ containerd.io
 curl
 docker-ce
 docker-ce-cli
-elasticsearch
 git
 gnupg-agent
 ipython3
