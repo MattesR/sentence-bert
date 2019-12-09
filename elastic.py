@@ -3,8 +3,10 @@ from elasticsearch.exceptions import RequestError
 from elasticsearch_dsl import Search, Index, Document, connections, \
     Keyword, Date, Text, Integer, MetaField, Nested, InnerDoc
 
+
 connections.create_connection(hosts=['localhost:9200'])
 enron_index = Index('enron')
+
 
 def create_index(name):
     """
