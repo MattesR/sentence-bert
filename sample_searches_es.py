@@ -3,7 +3,7 @@ from elasticsearch.exceptions import RequestError
 from elasticsearch_dsl import Search, Index, Document, connections, \
     Keyword, Date, Text, Integer, MetaField, Nested, InnerDoc
 from elasticsearch_dsl.query import Nested
-from elasticsearch_dsl.query import Match, Nested
+from elasticsearch_dsl.query import Match, Nested, Term
 client = Elasticsearch()
 
 

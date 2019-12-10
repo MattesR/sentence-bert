@@ -11,6 +11,7 @@ psycopg2 = "*"
 elasticsearch = "*"
 elasticsearch-dsl = "*"
 faiss = "*"
+tabulate = "*"
 
 [requires]
 python_version = "3.7"

@@ -30,7 +30,7 @@ def create_index(name):
 
 
 class TextUnit(InnerDoc):
-    content = Text(analyzer='snowball')
+    content = Text()
     position = Integer()
 
 

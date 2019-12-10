@@ -98,7 +98,8 @@ curl -X GET "localhost:9200/enron/_search?pretty" -H 'Content-Type: application/
         }
       }
     }
-  }
+  },
+  "size" : 0
 }
 '
 

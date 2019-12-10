@@ -5,9 +5,10 @@ from datetime import datetime
 
 import psycopg2
 from tqdm import tqdm
+from util.embeddings import string_to_faiss_embedding
 from util.parser import parsemail
 from util.splitter import paragraph_splitter
-import util.enron_to_postgres as db
+import util.database as db
 from sentence_transformers import SentenceTransformer
 import numpy as np
 import faiss
@@ -50,11 +51,7 @@ if __name__ == "__main__":
 
             for position, paragraph in enumerate(paragraph_splitter(parsed_mail.get_payload()), start=1):
                 unit_id = db.insert_text_unit(conn, paragraph, position, document_id)
-                # make a list with a single entry out of the paragraph
-                unit_embedding = model.encode([paragraph])
-                # cast the embedding to be faiss-compliant
-                # TODO: Make this less messy like for real that's horrible
-                unit_embedding = np.array([unit_embedding[0]])
+                unit_embedding = string_to_faiss_embedding(model, paragraph)
                 id_index.add_with_ids(unit_embedding, np.array([unit_id]))
                 current_index_size += 1
                 if current_index_size >= index_size:
