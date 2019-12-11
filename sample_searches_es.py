@@ -3,16 +3,20 @@ from elasticsearch.exceptions import RequestError
 from elasticsearch_dsl import Search, Index, Document, connections, \
     Keyword, Date, Text, Integer, MetaField, Nested, InnerDoc
 from elasticsearch_dsl.query import Nested
-from elasticsearch_dsl.query import Match, Nested, Term
+from elasticsearch_dsl.query import Match, Nested, Term, MoreLikeThis
 client = Elasticsearch()
 
-
+mlt_match = MoreLikeThis()
 innerMatch = Match(body__content='stock')
 nestedMatch = Nested(path='body', query=innerMatch)
+
+
 
 # retrieve all documents containing stock in its body)
 s = Search(using=client, index='enron') \
         .query("match", body="stock")
+
+
 
 
 """

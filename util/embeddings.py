@@ -2,7 +2,7 @@ import faiss
 import numpy as np
 
 
-def string_to_faiss_embedding(model,string):
+def string_to_faiss_embedding(model, string):
     """
     Takes a string and creates an embedding with the correct data structure for faiss to eat. The problem of it is,
     that neither faiss nor sentence-bert are designed to ever create a single embedding from a single string.

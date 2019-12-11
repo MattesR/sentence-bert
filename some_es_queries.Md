@@ -3,22 +3,26 @@
 ### get mapping
 curl -X GET "localhost:9200/enron/_mapping?pretty"  
 
+
+### get some documents via id
 ``` 
 curl -X GET "localhost:9200/_mget?pretty" -H 'Content-Type: application/json' -d' 
 {
     "docs" : [
         {
-            "_index" : "twitter",
+            "_index" : "enron",
             "_id" : "1"
         },
         {
-            "_index" : "twitter",
+            "_index" : "enron",
             "_id" : "2"
         }
     ]
 }
 '
 ```
+
+### set the similarity to BM25 
 ```
 curl -X PUT "localhost:9200/index?pretty" -H 'Content-Type: application/json' -d'
 {
@@ -48,11 +52,6 @@ curl -XGET "localhost:9200/enron/_search?pretty=true" -H 'Content-Type: applicat
 ```
 
 
-curl -X GET "localhost:9200/enron/_search?pretty" -H 'Content-Type: application/json' -d'
-{
-  "query": { "match": { "body": "stock" } }
-}
-'
 
 ### nested query 
 This nested query will all mails, which contain the word stock. The complete mails with all their text units are returned.  
@@ -88,14 +87,66 @@ curl -X GET "localhost:9200/enron/_search?pretty" -H 'Content-Type: application/
       "inner_hits": {       
 
       },
+    "query": {
+       "more_like_this" : {
+           "fields" : ["body.content"],
+           "like" : ["the stock market is fucked"],
+           "min_term_freq" : 1,
+           "min_doc_freq":1
+           
+       }
+   }
+    }
+  },
+  "size" : 0
+}
+'
+
+### query which returns the inner documents which cause the hit of the document.
+
+curl -X GET "localhost:9200/enron/_search?pretty" -H 'Content-Type: application/json' -d'
+{
+  "_source": {
+    "includes": [ "*" ],
+    "excludes": [ "body" ]
+  },
+  "query": {
+    "nested": {
+      "path": "body",
+      "inner_hits": {       
+
+      },
       "query": {
-        "constant_score" : {
-            "filter": {
-                "match": {
-                    "body.content" : "electrons" 
-                }
+            "match": {
+                "body.content" : "electrons" 
             }
-        }
+      }
+    }
+  }
+}
+'
+
+
+
+
+### more like this query which returns the inner documents which cause the hit of the document.
+
+curl -X GET "localhost:9200/enron/_search?pretty" -H 'Content-Type: application/json' -d'
+{
+  "_source": {
+    "includes": [ "*" ],
+    "excludes": [ "body" ]
+  },
+  "query": {
+    "nested": {
+      "path": "body",
+      "inner_hits": {       
+      },
+      "query": {
+          "more_like_this" : {
+              "fields" : ["content"],
+              "like" : "You owe me dinner"
+          }
       }
     }
   },
@@ -121,3 +172,38 @@ curl -X GET "localhost:9200/twitter/_search?pretty" -H 'Content-Type: applicatio
     "from": 10 
 }
 '
+
+
+curl -X GET "localhost:9200/_search?pretty" -H 'Content-Type: application/json' -d'
+{
+    "query": {
+        "more_like_this" : {
+            "fields" : ["body"],
+            "like" : "you owe me dinner"
+        }
+    }
+}
+'
+
+
+### nested query with more like this
+This nested query will all mails, which contain the word stock. The complete mails with all their text units are returned.  
+This is not what I wanted, but it might proof useful nonetheless.
+```
+curl -X GET "localhost:9200/enron/_search?pretty" -H 'Content-Type: application/json' -d'
+{
+    "query":  {
+      "nested" : {
+        "path" : "body",
+        "query" : {
+          "more_like_this" : {
+            "fields": ["body.content"],
+            "like" : "you owe me dinner" 
+            "min_term_freq" : 1
+          }
+        }
+      }
+    }
+}
+'
+```
