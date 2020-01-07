@@ -12,6 +12,7 @@ elasticsearch = "*"
 elasticsearch-dsl = "*"
 faiss = "*"
 tabulate = "*"
+tika = "*"
 
 [requires]
 python_version = "3.7"

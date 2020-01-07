@@ -3,7 +3,7 @@ import psycopg2
 from sentence_transformers import SentenceTransformer
 from contextlib import contextmanager
 
-DBNAME='enron'
+DBNAME='nsu'
 DBUSER='postgres'
 DBPASSWORD='postgres'
 
@@ -93,7 +93,7 @@ def create_tables():
         """)
     conn = None
     try:
-        conn = psycopg2.connect(host='localhost', database='enron', user='postgres', password='postgres')
+        conn = psycopg2.connect(host='localhost', database=DBNAME, user='postgres', password='postgres')
         cur = conn.cursor()
         # create table one by one
         for command in commands:
