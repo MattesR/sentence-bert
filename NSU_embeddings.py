@@ -6,9 +6,7 @@ from datetime import datetime
 import psycopg2
 from tqdm import tqdm
 from tika import parser as pdfparser
-from util.splitter import paragraph_splitter
 from util.embeddings import string_to_faiss_embedding
-
 from util.splitter import paragraph_splitter
 import util.database as db
 from sentence_transformers import SentenceTransformer
@@ -44,8 +42,11 @@ if __name__ == "__main__":
     falsely_parsed = 0
     for dirpath, dnames, fnames in os.walk(NSU_PATH):
         for file in tqdm(fnames, desc=f'walking {dirpath}'):
-            parsed_pdf = pdfparser.from_file(os.path.join(dirpath, file))
-
+            try:
+                parsed_pdf = pdfparser.from_file(os.path.join(dirpath, file))
+            except UnicodeDecodeError as e:
+                print(f'there was an an error, apparently {e}')
+                falsely_parsed += 1
             document_id = db.insert_document(conn, parsed_pdf['metadata']['Creation-Date'])
 
             for position, paragraph in enumerate(paragraph_splitter(parsed_pdf['content'],
@@ -73,10 +74,10 @@ if __name__ == "__main__":
     print(f'written final index File number {current_index} it contains {current_index_size} vectors')
     t_stop = time.time()
     total_time = t_stop - t_start
-    with open(result_path + '/faiss_walk.txt', 'w') as output:
+    with open(result_path + '/faiss_walk_nsu.txt', 'w') as output:
         output.write(f""" 
-        time needed to index the Enron Dataset  into Postgres and using paragraph splitter: {total_time} seconds 
+        time needed to index the NSU Dataset  into Postgres and using paragraph splitter: {total_time} seconds 
         """)
     print(
-        f'all emails were processed. {falsely_parsed} mails were falsely parsed and are missing from the corpus. \n'
+        f'all documents were processed. {falsely_parsed} documents were falsely parsed and are missing from the corpus. \n'
         f'it took {total_time} seconds to index the dataset.')

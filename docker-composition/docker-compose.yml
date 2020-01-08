@@ -37,7 +37,7 @@ services:
         soft: -1
         hard: -1
     volumes:
-      - ../databases/elastic/enron/data:/usr/share/elasticsearch/data
+      - ../databases/elastic/data:/usr/share/elasticsearch/data
     ports:
       - 9200:9200
     networks:

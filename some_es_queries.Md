@@ -4,6 +4,18 @@
 curl -X GET "localhost:9200/enron/_mapping?pretty"  
 
 
+### change a setting
+curl -X PUT "localhost:9200/nsu/_settings" -H 'Content-Type: application/json' -d'
+{
+    "index.mapping.nested_objects.limit": 500000
+}
+'
+
+
+
+
+
+
 ### get some documents via id
 ``` 
 curl -X GET "localhost:9200/_mget?pretty" -H 'Content-Type: application/json' -d' 
@@ -123,6 +135,7 @@ curl -X GET "localhost:9200/enron/_search?pretty" -H 'Content-Type: application/
       }
     }
   }
+  "size" : 0
 }
 '
 

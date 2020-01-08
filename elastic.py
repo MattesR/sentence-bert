@@ -6,6 +6,7 @@ from elasticsearch_dsl import Search, Index, Document, connections, \
 
 connections.create_connection(hosts=['localhost:9200'])
 enron_index = Index('enron')
+NSU_index = Index('nsu')
 
 
 def create_index(name):
@@ -30,8 +31,28 @@ def create_index(name):
 
 
 class TextUnit(InnerDoc):
-    content = Text()
+    content = Text(term_vector="yes")
     position = Integer()
+
+
+@NSU_index.document
+class Report(Document):
+    """
+    Report document for the enron index. It stores the following data about the Report:
+    author
+    receiver (mail address)
+    date
+    subject
+    payload
+    """
+    author = Keyword()
+    creation_date = Date()
+    title = Text()
+    body = Nested(TextUnit)
+
+    def add_unit(self, content, position):
+        self.body.append(
+          TextUnit(content=content, position=position))
 
 
 @enron_index.document
