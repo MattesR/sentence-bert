@@ -10,9 +10,10 @@ sentence-transformers = "*"
 psycopg2 = "*"
 elasticsearch = "*"
 elasticsearch-dsl = "*"
-faiss = "*"
 tabulate = "*"
 tika = "*"
+torch = "*"
+faiss-gpu = "*"
 
 [requires]
 python_version = "3.7"
