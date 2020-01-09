@@ -17,7 +17,7 @@ services:
       - POSTGRES_DB=enron
 
     volumes:
-      - ../databases/pg/enron/data:/var/lib/postgresql
+      - ./databases/pg/enron/data:/var/lib/postgresql
     ports:
       - "5432:5432"
 
@@ -37,7 +37,7 @@ services:
         soft: -1
         hard: -1
     volumes:
-      - ../databases/elastic/data:/usr/share/elasticsearch/data
+      - ./databases/elastic/data:/usr/share/elasticsearch/data
     ports:
       - 9200:9200
     networks:
