@@ -4,9 +4,15 @@ from elasticsearch_dsl import Search, Index, Document, connections, \
     Keyword, Date, Text, Integer, MetaField, Nested, InnerDoc
 from elasticsearch_dsl.query import Nested
 from elasticsearch_dsl.query import Match, Nested, Term, MoreLikeThis
+from tabulate import tabulate
+
 client = Elasticsearch()
 
-mlt_match = MoreLikeThis()
+
+mlt_match = MoreLikeThis(fields=["body.content"],
+                         like=["you owe me"],
+                         min_term_freq=1,
+                         min_doc_freq=1)
 innerMatch = Match(body__content='stock')
 nestedMatch = Nested(path='body', query=innerMatch)
 

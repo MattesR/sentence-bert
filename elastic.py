@@ -1,7 +1,7 @@
 from elasticsearch import Elasticsearch
 from elasticsearch.exceptions import RequestError
 from elasticsearch_dsl import Search, Index, Document, connections, \
-    Keyword, Date, Text, Integer, MetaField, Nested, InnerDoc
+    Keyword, Date, Text, Integer, Nested, InnerDoc, Boolean
 
 
 connections.create_connection(hosts=['localhost:9200'])
@@ -11,11 +11,12 @@ NSU_index = Index('nsu')
 
 def create_index(name):
     """
-    creates an index and puts it into elastic search
+    creates an index and puts it into elastic search, with documentclass Hooverdoc.
     :param name: name of the index you want to create.
     :return:
     """
     index = Index(name)
+    index.document(HooverDoc)
     try:
         index.create()
     except RequestError as e:
@@ -75,4 +76,37 @@ class Mail(Document):
         self.body.append(
           TextUnit(content=content, position=position))
 
+
+class HooverDoc(Document):
+    """
+    Document with the same fields as documents in hoover-search. This document will be used for created indices.
+    The only difference is, that the Text field is replaced with the nested TextUnits.
+    """
+    attachments = Boolean()
+    content_type = Keyword()
+    date = Date()
+    date_created = Date()
+    email_domains = Keyword()
+    filetype = Keyword()
+    id = Keyword()
+    in_reply_to = Keyword()
+    lang = Keyword()
+    md5 = Keyword()
+    message = Keyword()
+    message_id = Keyword()
+    path = Keyword()
+    path_text = Text()
+    path_parts = Keyword()
+    references = Keyword()
+    rev = Integer()
+    sha1 = Keyword()
+    size = Integer()
+    suffix = Keyword()
+    thread_index = Keyword()
+    word_count = Integer()
+    body = Nested(TextUnit)
+
+    def add_unit(self, content, position):
+        self.body.append(
+          TextUnit(content=content, position=position))
 

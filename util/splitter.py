@@ -1,5 +1,3 @@
-
-
 def paragraph_splitter(text, min_line=0, min_paragraph=None):
     """
     splits texts heuristically into paragraphs. A paragraph is non empty lines of text followed by one or more empty
@@ -34,3 +32,23 @@ def paragraph_splitter(text, min_line=0, min_paragraph=None):
                         paragraphs[index:index + 2] = [' '.join(paragraphs[index:index + 2])]
                     finished = False
     return paragraphs
+
+
+def create_pseudo_doc(textunits, n=6):
+    """
+    Function that creates a list of documents based on a list of TextUnits/Strings. it concatenates chunks of n strings
+    into a new String and appends it to the list.
+    @param textunits: list of Strings
+    @param n: number of Textunits that should be concatenated to a doc
+    @return: a list of new pseudo-documents.
+    """
+    list_of_pseudo_docs = []
+    for i in range(0, len(textunits), n):
+        list_of_pseudo_docs.append(textunits[i:i+n])
+    return list_of_pseudo_docs
+
+
+def create_document_pairs(pseudo_documents):
+    return ' '.join(pseudo_documents[::2]),  ' '.join(pseudo_documents[1::2])
+
+

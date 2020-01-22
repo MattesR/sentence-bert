@@ -47,7 +47,7 @@ if __name__ == "__main__":
         output.write(f"""
         time needed to index the Enron Dataset into Elasticsearch using paragraph splitter: {total_time} seconds 
         """)
-    print(f'all emails were processed. {falsely_parsed} mails were falsely parsed and are missing from the corpus. \n'
+    print(f'all documents were processed. {falsely_parsed} mails were falsely parsed and are missing from the corpus. \n'
           f'it took {total_time} seconds to index the dataset.')
 
 

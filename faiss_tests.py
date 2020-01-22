@@ -20,7 +20,7 @@ DBPASSWORD = 'postgres'
 ENRON_MAIL_PATH = "../datasets/enron"
 test_path = "/home/moiddes/opt/datasets/enron/white-s/val"
 index_size = 200000
-headers = ['unit_id', 'content', 'position', 'document_id']
+tabulate_headers = ['unit_id', 'content', 'position', 'document_id']
 from util import database as db
 import time
 
@@ -32,8 +32,8 @@ def similarity_from_string(string, k, model=model, faiss_path=faiss_path):
     with psycopg2.connect(host='localhost', database=DBNAME, user=DBUSER, password=DBPASSWORD) as con:
         results = db.get_sentences_from_ids(con, similarity_ids)
     t_stop = time.time()
-    print(tabulate(results, headers=headers))
-    print (f' Getting these results took {t_stop - t_start} seconds')
+    print(tabulate(results, headers=tabulate_headers))
+    print(f' Getting these results took {t_stop - t_start} seconds')
 
 
 
@@ -45,7 +45,7 @@ def search_on_disk(path, embedding, k):
     result_heap = ResultHeap(nq=len(embedding), k=k)
     for filename in os.listdir(path):
         if filename != '.gitignore':
-            index = faiss.read_index(faiss_path + '/' + filename)
+            index = faiss.read_index(path + '/' + filename)
             dist, ids = index.search(embedding, k)
             result_heap.add_batch_result(dist, ids, i * index_size)
     result_heap.finalize()

@@ -11,7 +11,8 @@ curl -X PUT "localhost:9200/nsu/_settings" -H 'Content-Type: application/json' -
 }
 '
 
-
+### get one document via ID
+curl -X GET "localhost:9200/enron/_doc/0?pretty"
 
 
 
@@ -84,7 +85,7 @@ curl -X GET "localhost:9200/enron/_search?pretty" -H 'Content-Type: application/
 ```
 
 
-### nested query which only returns the inner document with the hit bam bam:
+### nested query which only returns the inner document with the hit:
 
 
 curl -X GET "localhost:9200/enron/_search?pretty" -H 'Content-Type: application/json' -d'
@@ -102,7 +103,7 @@ curl -X GET "localhost:9200/enron/_search?pretty" -H 'Content-Type: application/
     "query": {
        "more_like_this" : {
            "fields" : ["body.content"],
-           "like" : ["the stock market is fucked"],
+           "like" : ["you owe me"],
            "min_term_freq" : 1,
            "min_doc_freq":1
            
@@ -110,9 +111,49 @@ curl -X GET "localhost:9200/enron/_search?pretty" -H 'Content-Type: application/
    }
     }
   },
-  "size" : 0
+  "size" : 10
 }
 '
+
+curl -X GET "localhost:9200/enron/_search?pretty" -H 'Content-Type: application/json' -d'
+{
+  "_source": {
+    "includes": [ "*" ],
+    "excludes": [ "body" ]
+  },
+  "query": {
+    "nested": {
+      "path": "body",
+      "inner_hits": {       
+
+      },
+    "query": {
+       "more_like_this" : {
+           "fields" : ["body.content"],
+           "like" : _1,
+           "min_term_freq" : 1,
+           "min_doc_freq":1
+           
+       }
+   }
+    }
+  },
+  "size" : 10
+}
+'
+
+
+
+
+            {
+                "_index" : "imdb",
+                "_id" : "1"
+            },
+
+
+
+
+
 
 ### query which returns the inner documents which cause the hit of the document.
 
