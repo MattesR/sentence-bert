@@ -2,7 +2,7 @@ from flair.data import Sentence
 import re
 
 
-def paragraph_splitter(text, min_line=0, min_paragraph=0, purge_specials=False):
+def paragraph_splitter(text, min_line=0, min_paragraph=0, max_paragraph=False, purge_specials=False):
     """
     splits texts heuristically into paragraphs. A paragraph is non empty lines of text followed by one or more empty
     lines of text.
@@ -10,6 +10,8 @@ def paragraph_splitter(text, min_line=0, min_paragraph=0, purge_specials=False):
     :param min_line: The minimal length of lines that the splitter will consider. Anything below this limit will be
                     deleted
     :param min_paragraph: the minimal length of a paragraph. A shorter paragraph will be attached to the next paragraph
+    :param max_paragraph: the maximal length of a a paragraph. a paragraph which is too long will be cut at the last or
+    next sentence.
     :return: list of paragraphs with minimal Paragraph length min_paragraph, if provided.
     """
     paragraphs = []
@@ -24,10 +26,31 @@ def paragraph_splitter(text, min_line=0, min_paragraph=0, purge_specials=False):
                 paragraphs.append(current_paragraph)
                 current_paragraph = ''
         else:
-            if line[len(line)-1] == '-':  #if the last character in line is a hyphen, delete it and add line,
-                current_paragraph += line[:len(line)-1]
+            if max_paragraph is not False:
+                if len(current_paragraph) + len(line) < max_paragraph:
+                    if line[len(line)-1] == '-':  #if the last character in line is a hyphen, delete it and add line,
+                        current_paragraph += line[:len(line)-1]
+                    else:
+                        current_paragraph += line + ' '  # it it doesn't, add it with a space between the ending characters
+                else:
+                    overdraw = len(current_paragraph) + len(line) - max_paragraph
+                    end_of_paragraph = find_closest_sentence_end(line, len(line)-overdraw-1) + 1
+                    if end_of_paragraph:
+                        current_paragraph += line[:end_of_paragraph]
+                        paragraphs.append(current_paragraph)
+                        current_paragraph = line[end_of_paragraph+1:]
+                    else:
+                        end_of_paragraph = find_closest_sentence_end(current_paragraph, len(current_paragraph)-1) + 1
+                        new_paragraph = current_paragraph[end_of_paragraph+2:]
+                        current_paragraph = current_paragraph[:end_of_paragraph]
+                        paragraphs.append(current_paragraph)
+                        current_paragraph = new_paragraph
             else:
-                current_paragraph += line + ' '  # it it doesn't, add it with a space between the ending characters
+                if line[len(line)-1] == '-':  #if the last character in line is a hyphen, delete it and add line,
+                    current_paragraph += line[:len(line)-1]
+                else:
+                    current_paragraph += line + ' '
+
     if current_paragraph:
         paragraphs.append(current_paragraph)
     return paragraphs
@@ -82,5 +105,39 @@ def create_flair_sentences(sentences):
 
 def flair_pairs_from_strings(textUnits, n):
     return create_flair_sentences(create_document_pairs(create_pseudo_pages(textUnits, n)))
+
+
+def find_closest_sentence_end(string, index, characters=['!', '.', '?']):
+    """
+    finds the closest sentence ending character in a string, relative to a index position in this string.
+    Sentence ending chracters are . ! and ?, if not specified. Another List can be provided.
+    If none is found, the function Returns False. Else it returns the index of
+    the closest sentence ending character.
+    The function doesn't care for any occaision like dates or domain names.
+    @param string: the string
+    @param index: the index
+    @param characters: the default characters
+    @return: index of the closest sentence ending character or False
+    """
+    closest_off = len(string)
+    closest_pos = index
+    for character in characters:
+        left_off = closest_off if string.rfind(character, 0, index) == -1 else abs(string.rfind(character, 0, index)-index)
+        left_pos = index - left_off
+        right_off = closest_off if string.find(character, index) == -1 else abs(string.find(character, index)-index)
+        right_pos = index + right_off
+        if left_off < right_off:
+            if left_off < closest_off:
+                closest_off = left_off
+                closest_pos = left_pos
+        else:
+            if right_off < closest_off:
+                closest_off = left_off
+                closest_pos = left_pos
+    if closest_off == len(string):
+        closest_off = False
+        closest_pos = False
+    return closest_pos
+
 
 

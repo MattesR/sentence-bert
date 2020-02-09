@@ -22,27 +22,6 @@ def embed_all(embedding, sentences):
         return True
 
 
-def find_closest_sentence_end(string, index, characters=['!', '.', '?']):
-    """
-    finds the closest sentence ending character in a string, relative to a index position in this string.
-    Sentence ending chracters are . ! and ?, if not specified. Another List can be provided.
-    If none is found, the function Returns False. Else it returns the index of
-    the closest sentence ending character.
-    The function doesn't care for any occaision like dates or domain names.
-    @param string: the string
-    @param index: the index
-    @param characters: the default characters
-    @return: index of the closest sentence ending character or False
-    """
-    closest_index = False
-    for character in characters:
-        left_pos = False if string.rfind(character, 0, index) == -1 else abs(string.rfind(character, 0, index)-index)
-        right_pos = False if string.find(character, index) == -1 else abs(string.find(character, index)-index)
-        if closest_index is False:
-            closest_index = min(left_pos, right_pos)
-        else:
-            closest_index = min(left_pos, right_pos, closest_index)
-    return closest_index
 
 
 

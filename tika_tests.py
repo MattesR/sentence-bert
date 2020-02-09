@@ -10,9 +10,3 @@ author = parsed_pdf['metadata']['Author']
 title = parsed_pdf['metadata']['title']
 date = parsed_pdf['metadata']['Creation-Date']
 
-newSentences = []
-for sentence in sentences:
-    newSentence = ''
-    for token in sentence:
-        newSentence += ' ' + token.text
-    newSentences.append(newSentence)
