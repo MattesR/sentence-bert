@@ -36,7 +36,6 @@ def similarity_from_string(string, k, model=model, faiss_path=faiss_path):
     print(f' Getting these results took {t_stop - t_start} seconds')
 
 
-
 def search_on_disk(path, embedding, k):
     """
     returns a tuple of ids to look up in the postgres database
