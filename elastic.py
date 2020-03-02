@@ -7,6 +7,7 @@ from elasticsearch_dsl import Search, Index, Document, connections, \
 connections.create_connection(hosts=['localhost:9200'])
 enron_index = Index('enron')
 NSU_index = Index('nsu')
+experiment_index = Index('experiment')
 
 
 def create_index(name):

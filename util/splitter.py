@@ -23,28 +23,40 @@ def paragraph_splitter(text, min_line=0, min_paragraph=0, max_paragraph=False, p
             line = re.sub(r'([!.,])([A-Za-z]{3})', r'\1 \2', line)
         if len(line) <= min_line:
             if current_paragraph and len(current_paragraph) >= min_paragraph:
-                paragraphs.append(current_paragraph)
-                current_paragraph = ''
+                end_of_paragraph = find_closest_sentence_end(current_paragraph, len(current_paragraph) - 1)
+                if end_of_paragraph:
+                    end_of_paragraph += 1
+                    new_paragraph = current_paragraph[end_of_paragraph + 1:]
+                    current_paragraph = current_paragraph[:end_of_paragraph]
+                    paragraphs.append(current_paragraph)
+                    current_paragraph = dehyphen(new_paragraph)
+                else:  # if there's none in the paragraph either, hard-cut the paragraph at the maximum length
+                    paragraphs.append(current_paragraph)
+                    current_paragraph = ''
         else:
             if max_paragraph is not False:
                 if len(current_paragraph) + len(line) < max_paragraph:
-                    if line[len(line)-1] == '-':  #if the last character in line is a hyphen, delete it and add line,
-                        current_paragraph += line[:len(line)-1]
-                    else:
-                        current_paragraph += line + ' '  # it it doesn't, add it with a space between the ending characters
+                    current_paragraph += dehyphen(line)
                 else:
                     overdraw = len(current_paragraph) + len(line) - max_paragraph
-                    end_of_paragraph = find_closest_sentence_end(line, len(line)-overdraw-1) + 1
+                    end_of_paragraph = find_closest_sentence_end(line, len(line)-overdraw-1)
                     if end_of_paragraph:
+                        end_of_paragraph += 1
                         current_paragraph += line[:end_of_paragraph]
                         paragraphs.append(current_paragraph)
-                        current_paragraph = line[end_of_paragraph+1:]
-                    else:
-                        end_of_paragraph = find_closest_sentence_end(current_paragraph, len(current_paragraph)-1) + 1
-                        new_paragraph = current_paragraph[end_of_paragraph+2:]
-                        current_paragraph = current_paragraph[:end_of_paragraph]
-                        paragraphs.append(current_paragraph)
-                        current_paragraph = new_paragraph
+                        current_paragraph = dehyphen(line[end_of_paragraph+1:])
+                    else:  # if there's no sentence ending symbol in the next line, find it at the end of the paragraph
+                        end_of_paragraph = find_closest_sentence_end(current_paragraph, len(current_paragraph)-1)
+                        if end_of_paragraph:
+                            end_of_paragraph += 1
+                            new_paragraph = dehyphen(current_paragraph[end_of_paragraph+1:])
+                            current_paragraph = current_paragraph[:end_of_paragraph]
+                            paragraphs.append(current_paragraph)
+                            current_paragraph = new_paragraph
+                        else:  # if there's none in the paragraph either, hard-cut the paragraph at the maximum length
+                            current_paragraph += line[:-overdraw]
+                            paragraphs.append(current_paragraph)
+                            current_paragraph = line[-overdraw:]
             else:
                 if line[len(line)-1] == '-':  #if the last character in line is a hyphen, delete it and add line,
                     current_paragraph += line[:len(line)-1]
@@ -66,6 +78,9 @@ def create_pseudo_pages(textUnits, n=6):
     """
     rest = (len(textUnits) % n)
     list_of_pseudo_docs = []
+    if len(textUnits) < n:
+        list_of_pseudo_docs.append(textUnits)
+        return list_of_pseudo_docs
     for i in range(0, len(textUnits) - rest, n):  # add rest to last page instead of creating new page
         list_of_pseudo_docs.append(textUnits[i:i + n])
     for restString in textUnits[-rest:]:
@@ -132,12 +147,24 @@ def find_closest_sentence_end(string, index, characters=['!', '.', '?']):
                 closest_pos = left_pos
         else:
             if right_off < closest_off:
-                closest_off = left_off
-                closest_pos = left_pos
+                closest_off = right_off
+                closest_pos = right_pos
     if closest_off == len(string):
-        closest_off = False
         closest_pos = False
     return closest_pos
 
 
-
+def dehyphen(string):
+    """
+    strips hyphen at end of string and adds space if it doesn't find a hyphen. If the string is empty, it just returns
+    empty.
+    @param string: the string
+    @return: the new string
+    """
+    if string:
+        if string[-1] == '-':
+            return string[:-1]
+        else:
+            return string + ' '
+    else:
+        return string
