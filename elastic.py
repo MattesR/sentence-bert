@@ -111,3 +111,7 @@ class HooverDoc(Document):
         self.body.append(
           TextUnit(content=content, position=position))
 
+
+class TestCase(Document):
+    content = Text(term_vector="yes")
+
