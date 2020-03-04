@@ -45,6 +45,18 @@ def paragraph_splitter(text, min_line=0, min_paragraph=0, max_paragraph=False, p
                         current_paragraph += line[:end_of_paragraph]
                         paragraphs.append(current_paragraph)
                         current_paragraph = dehyphen(line[end_of_paragraph+1:])
+                        while len(current_paragraph) > max_paragraph:
+                            rest_of_line = current_paragraph
+                            overdraw = len(current_paragraph) - max_paragraph
+                            end_of_paragraph = find_closest_sentence_end(rest_of_line, len(rest_of_line) - overdraw - 1)
+                            if end_of_paragraph:
+                                end_of_paragraph += 1
+                                current_paragraph = rest_of_line[:end_of_paragraph]
+                                paragraphs.append(current_paragraph)
+                                current_paragraph = dehyphen(rest_of_line[end_of_paragraph + 1:])
+                            else:
+                                current_paragraph = rest_of_line
+                                break
                     else:  # if there's no sentence ending symbol in the next line, find it at the end of the paragraph
                         end_of_paragraph = find_closest_sentence_end(current_paragraph, len(current_paragraph)-1)
                         if end_of_paragraph:

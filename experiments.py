@@ -26,16 +26,16 @@ def create_new_es_testindex(name):
     new_index.create()
 
 
-def bulk_add_collection_to_es(path, name, textUnits=4):
+def bulk_add_collection_to_es(path, name, textUnits=4, min_size=0):
     create_new_es_testindex(name)
     connections.create_connection(hosts=['localhost'], timeout=20)
-    documents = read_in_documents(path)
+    documents = read_in_documents(path, min_size=min_size)
     print(f'loaded all documents from {path}')
     pairs = [splitter.create_document_pairs(splitter.create_pseudo_pages(document, textUnits)) for document in documents]
     es_docs = [TestCase(meta={'id': paragraph_id}, content=pseudo_paragraph) for paragraph_id, pseudo_paragraph
                in enumerate(itertools.chain(*pairs))]
     TestCase.init()
-    print(f'bulk adding all {len(es_docs)} documents to es index {name}')
+    print(f'bulk adding {len(es_docs)} documents to es index {name}')
     bulk(connections.get_connection(), (d.to_dict(True) for d in es_docs))
     return len(es_docs)
 
