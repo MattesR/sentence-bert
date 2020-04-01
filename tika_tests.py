@@ -6,7 +6,7 @@ from tqdm import tqdm
 nsu_path = './datasets/NSU-Berichte'
 
 
-def read_in_documents(path, min_size=0):
+def read_in_documents(path, min_size=0, min_paragraph=200, max_paragraph=400, purge_specials=True):
     document_list = []
     for dirpath, dnames, fnames in os.walk(path):
         for file in tqdm(fnames, desc=f'walking {dirpath}'):
@@ -14,8 +14,8 @@ def read_in_documents(path, min_size=0):
             size = os.stat(file_path).st_size
             if size >= min_size:
                 parsed_pdf = pdfparser.from_file(file_path)
-                document = paragraph_splitter(parsed_pdf['content'], min_paragraph=200,
-                                              max_paragraph=400, purge_specials=True)
+                document = paragraph_splitter(parsed_pdf['content'], min_paragraph=min_paragraph,
+                                              max_paragraph=max_paragraph, purge_specials=purge_specials)
                 document_list.append(document)
     return document_list
 

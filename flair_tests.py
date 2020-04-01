@@ -1,6 +1,10 @@
 from flair.embeddings import BertEmbeddings, DocumentPoolEmbeddings
 import faiss
 import numpy as np
+import os
+import experiments
+import torch
+
 
 result_path = './results'
 faiss_path = './faiss_indexes'
@@ -18,7 +22,6 @@ def embed_all(embedding, sentences):
     for index, sentence in enumerate(sentences):
         try:
             embedding.embed(sentence)
-            print(f'successfully embedded sentence {index}')
         except RuntimeError:
             print(f'could not embed sentence with index {index}\nstoring in failed index list')
             failed_list.append(index)
@@ -43,6 +46,8 @@ def create_faiss_index(embeddings, name, path=faiss_path, index_size=INDEX_SIZE)
             i += 1
 
 
+
+
 def array_from_list(list_of_arrays):
     """
     gives an array from a list of arrays. they must all have the same length.
@@ -53,3 +58,8 @@ def array_from_list(list_of_arrays):
     shape[:0] = [len(list_of_arrays)]
     arr = np.concatenate(list_of_arrays).reshape(shape)
     return arr
+
+
+# if this script is called directly from the command line, it will be because generating faiss index failed.
+# the script will automatically recover from a failure by calling itself again and starting where it had to leave off
+# due to failure.
