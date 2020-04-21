@@ -36,6 +36,15 @@ def similarity_from_string(string, k, model=model, faiss_path=faiss_path):
     print(f' Getting these results took {t_stop - t_start} seconds')
 
 
+def get_ranking(string, k, model=model, faiss_path=faiss_path):
+    t_start = time.time()
+    faiss_embedding = string_to_faiss_embedding(model, string)
+    similarity_ids = search_on_disk(faiss_path, faiss_embedding, k)
+    t_stop = time.time()
+    print(f' Getting these results took {t_stop - t_start} seconds')
+    return similarity_ids
+
+
 def search_on_disk(path, embedding, k):
     """
     returns a tuple of ids to look up in the postgres database

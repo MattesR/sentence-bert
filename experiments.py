@@ -2,14 +2,16 @@
 
 import os
 import sys
+import re
 import time
+import csv
 from util import splitter
 from tika_tests import read_in_documents
 from elasticsearch_dsl import Index, connections, Search
 from elasticsearch_dsl.query import MoreLikeThis
 from elastic import TestCase
 from elasticsearch import Elasticsearch
-from elasticsearch.exceptions import NotFoundError
+from elasticsearch.exceptions import NotFoundError, RequestError
 from elasticsearch.helpers import bulk
 import itertools
 import faiss
@@ -17,7 +19,6 @@ import numpy as np
 import flair_tests
 from flair.data import Sentence
 from flair.embeddings import BertEmbeddings, DocumentPoolEmbeddings
-import torch
 import shutil
 
 client = Elasticsearch()
@@ -29,7 +30,7 @@ embedding = BertEmbeddings(layers='-1')
 document_embeddings = DocumentPoolEmbeddings([embedding], fine_tune_mode='nonlinear')
 
 
-def create_test_dataset(path, page_size, write_name=False):
+def create_test_dataset(path, page_size=4, write_name=''):
     docs = read_in_documents(path)
     pairs = [splitter.create_document_pairs(splitter.create_pseudo_pages(document, page_size)) for document in docs]
     flat_pairs = [paragraph for document in pairs for paragraph in document]
@@ -41,7 +42,7 @@ def create_test_dataset(path, page_size, write_name=False):
     return flat_pairs
 
 
-def get_dataset(data_location, read_from_file, page_size=4, write=False):
+def get_dataset(data_location, read_from_file, page_size=4, write=''):
     """
     gets the dataset according to the input. If the read_from_file Flag is set, the function loads and returns the
     generated dataset with the name, which is given as the input.
@@ -67,7 +68,7 @@ def delete_es_index(name):
     try:
         response = new_index.delete()
         if response['acknowledged']:
-            print(f'delete index {name}')
+            print(f'deleted index {name}')
         else:
             print(f'deletion not acked, instead it returned {response}')
     except NotFoundError:
@@ -75,23 +76,32 @@ def delete_es_index(name):
 
 
 def create_new_es_testindex(name):
-    connection = connections.create_connection(hosts=['localhost'], timeout=20)
     new_index = Index(name)
     new_index.document(TestCase)
-    new_index.create()
+    try:
+        new_index.create()
+        return True
+    except RequestError:
+        print(f'the index with name {name} already exists, delete first.')
+        return False
 
 
-def bulk_add_collection_to_es(path, name, page_size=4, min_size=0):
-    create_new_es_testindex(name)
+def bulk_add_collection_to_es(data_location, read_from_file, name):
+    document_pairs = get_dataset(data_location, read_from_file, write=f'{name}_dataset')
+    start_time = time.time()
+    if not create_new_es_testindex(name):
+        delete_es_index(name)
+        create_new_es_testindex(name)
     connections.create_connection(hosts=['localhost'], timeout=20)
-    documents = read_in_documents(path, min_size=min_size)
-    print(f'loaded all documents from {path}')
-    pairs = [splitter.create_document_pairs(splitter.create_pseudo_pages(document, page_size)) for document in documents]
-    es_docs = [TestCase(meta={'id': paragraph_id}, content=pseudo_paragraph) for paragraph_id, pseudo_paragraph
-               in enumerate(itertools.chain(*pairs))]
+    es_docs = [TestCase(meta={'id': paragraph_id}, content=pseudo_paragraph)
+               for paragraph_id, pseudo_paragraph in enumerate(document_pairs)]
     TestCase.init()
     print(f'bulk adding {len(es_docs)} documents to es index {name}')
     bulk(connections.get_connection(), (d.to_dict(True) for d in es_docs))
+    stop_time = time.time() - start_time
+    with open(f'./datasets/elasticsearch_{name}_timing', 'w') as f:
+        f.write(f'time for creating es index {name}: {stop_time}\n')
+        f.write(f'number of items in the index: {len(es_docs)}')
     return len(es_docs)
 
 
@@ -101,25 +111,44 @@ def create_mlt_with_id(document_id, index, size=20):
         mlt_match = MoreLikeThis(fields=["content"],
                                  like={'_index': index, '_id': document_id},
                                  min_term_freq=1,
-                                 min_doc_freq=1)
+                                 min_doc_freq=1,
+                                 minimum_should_match='5%')
     else:
         like_list = [{'_index': index, '_id': item} for item in document_id]
         mlt_match = MoreLikeThis(fields=["content"],
                                  like=like_list,
                                  min_term_freq=1,
-                                 )
+                                 min_doc_freq=1,
 
+                                 )
     s = s.query(mlt_match)
     s = s[:size]
     return s
 
 
 def get_mlt_results(document_id, index, size=20):
-    s = create_mlt_with_id(document_id, index, size=20)
+    s = create_mlt_with_id(document_id, index, size=size)
     response = s.execute()
     result_ids = [int(hit.meta.id) for hit in response]
     result_values = [int(hit.meta.score) for hit in response]
     return result_ids, result_values
+
+
+def es_create_result_csv(name, index_size, index, result_size):
+    start_time = time.time()
+    es_results = [get_mlt_results(item, index, result_size) for item in range(index_size)]
+    with open(f'./{name}_es_results.csv', 'w', newline='') as myfile:
+        wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
+        for line in es_results:
+            wr.writerow(line)
+    stop_time = time.time() - start_time
+    with open(f'./datasets/elasticsearch_{name}_timing', 'a') as f:
+        f.write(f'time for generating es results for {name}: {stop_time}\n')
+    return stop_time
+
+
+
+
 
 
 def generate_faiss_index(batch_size, name, data_location, read_from_file, path=faiss_path,
@@ -152,16 +181,20 @@ def generate_faiss_index(batch_size, name, data_location, read_from_file, path=f
                 arglist = ['filename', str(batch_size), name, data_location, str(read_from_file), path,
                            str(index_size), str(index_start), str(index_name_start),  failed_list]
                 overall_time = time.time() - start_time
-                wrap_up(arglist, failed_list, embedding_number, batch_size, name, index_name_start, overall_time)
+                wrap_up(arglist, failed_list, name, index_name_start, overall_time)
                 break
 
         faiss.write_index(index, path + f'/{name}')
         print(f'saved one faiss index in file with name {name}')
+        overall_time = time.time() - start_time
+        with open(f'{dataset_path}/{name}_stats_before_failure', 'a') as f:
+            f.write(f'timing saving the index {name} {index_name_start}: {overall_time}\n')
     else:
         current_index_size = 0
         index_position = index_start
         index_number = index_name_start
-        path += f'/{name}'
+        if not path.endswith(f'/{name}'):
+            path += f'/{name}'
         if index_number == 0:
             try:
                 os.mkdir(path)
@@ -180,6 +213,9 @@ def generate_faiss_index(batch_size, name, data_location, read_from_file, path=f
                                           )
                 else:
                     faiss.write_index(id_index, path + f'/{name}_{index_number}')
+                    overall_time = time.time() - start_time
+                    with open(f'{dataset_path}/{name}_stats_before_failure', 'a') as f:
+                        f.write(f'timing saving the index {name} {index_name_start}: {overall_time}\n')
                     index = faiss.IndexFlatL2(768)
                     index_number += 1
                     current_index_size = batch_size
@@ -189,7 +225,7 @@ def generate_faiss_index(batch_size, name, data_location, read_from_file, path=f
                                                                        index_position + batch_size)])
                                           )
             else:
-                print(f'failed at index {index_position} to {index_position + batch_size}, restarting after that batch')
+                print(f'failed at index {index_position-batch_size} to {index_position}, restarting after that batch')
                 failed_list.append(embeddings[1])
                 index_start = embeddings[1][1] + 1
                 print(f'index start is at {index_start}')
@@ -200,6 +236,9 @@ def generate_faiss_index(batch_size, name, data_location, read_from_file, path=f
                 wrap_up(arglist, failed_list, name, index_name_start, overall_time)
 
         print(f'saved {index_number} indices in directory with name {name}')
+    overall_time = time.time() - start_time
+    with open(f'{dataset_path}/{name}_stats_before_failure', 'a') as f:
+        f.write(f'timing saving the index {name} {index_name_start}: {overall_time}\n')
     if failed_list:
         return failed_list
     else:
@@ -240,11 +279,23 @@ def wrap_up(old_arguments, failed_list, name, index_name_start, overall_time):
     # index start will be the first index to generate embeddings for on resumption
     # index name start is
     arglist = old_arguments
-    arglist[3] = f'{name}_dataset'  # the dataset will never be generated
+    if not arglist[4]:
+        arglist[3] = f'{name}_dataset'  # the dataset will never be generated. but doesn't need to have that name
     arglist[4] = str(1)
     arglist[8] = str(index_name_start + 1)
     arglist[9] = dataset_path + f'/{name}_failed list.txt'  # the failed list will be loaded
     os.execv(__file__, arglist)
+
+
+def get_total_time(timing_file):
+    total_time = 0
+    with open(timing_file, 'r') as f:
+        for line in f.readlines():
+            test = re.split(': ', line)
+            total_time += float(test[1])
+    return total_time
+
+
 
 
 # if this script is called directly from the command line, it will be because generating faiss index failed.
@@ -252,6 +303,6 @@ def wrap_up(old_arguments, failed_list, name, index_name_start, overall_time):
 # due to failure.
 if __name__ == "__main__":
     print(f'restarting the generation of the embeddings')
-    arglist = sys.argv
-    generate_faiss_index(int(arglist[1]), arglist[2], arglist[3], int(arglist[4]), arglist[5],
-                         int(arglist[6]), int(arglist[7]), int(arglist[8]), arglist[9])
+    input_args = sys.argv
+    generate_faiss_index(int(input_args[1]), input_args[2], input_args[3], int(input_args[4]), input_args[5],
+                         int(input_args[6]), int(input_args[7]), int(input_args[8]), input_args[9])
