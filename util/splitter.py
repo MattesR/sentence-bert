@@ -20,7 +20,7 @@ def paragraph_splitter(text, min_line=0, min_paragraph=0, max_paragraph=False, p
         line = line.strip()
         if purge_specials:
             line = re.sub(r'(\W)(?=\1)', '', line)
-            line = re.sub(r'([!.,])([A-Za-z]{3})', r'\1 \2', line) # Adds Whitespace between words if it's missing
+            line = re.sub(r'([!.,])([A-Za-z]{3})', r'\1 \2', line)  # Adds Whitespace between words if it's missing
         if len(line) <= min_line:
             if current_paragraph and len(current_paragraph) >= min_paragraph:
                 end_of_paragraph = find_closest_sentence_end(current_paragraph, len(current_paragraph) - 1)
@@ -45,7 +45,10 @@ def paragraph_splitter(text, min_line=0, min_paragraph=0, max_paragraph=False, p
                     overdraw = len(current_paragraph) + len(line) - max_paragraph
                     # find the closest sentence end to the overdraw in the line that you want to add, if its reasonably
                     # distanced from the overdraw. (20 cut a lot of sentences, was too small)
-                    end_of_paragraph = find_closest_sentence_end(line, len(line)-overdraw-1, max_distance=100)
+                    end_of_paragraph = find_closest_sentence_end(line, len(line)-overdraw-1,
+                                                                 max_left_distance=len(line)-overdraw - min_paragraph,
+                                                                 max_right_distance=min_paragraph // 2
+                                                                 )
                     # if you find a sentence end in the line, add the line up to the sentence end to the current
                     # paragraph, add the current paragraph to the list and have the rest of the line be the new
                     # current paragraph.
@@ -63,9 +66,12 @@ def paragraph_splitter(text, min_line=0, min_paragraph=0, max_paragraph=False, p
                         while len(current_paragraph) > max_paragraph:
                             rest_of_line = current_paragraph
                             overdraw = len(current_paragraph) - max_paragraph
-                            end_of_paragraph = find_closest_sentence_end(rest_of_line,
-                                                                         len(rest_of_line) - overdraw - 1,
-                                                                         max_distance=100)
+                            end_of_paragraph = find_closest_sentence_end(
+                                rest_of_line,
+                                len(rest_of_line) - overdraw - 1,
+                                max_left_distance=len(rest_of_line) - overdraw - min_paragraph,
+                                max_right_distance=min_paragraph // 2
+                                 )
                             if end_of_paragraph > min_paragraph-1:  # so that no tiny paragraphs are added
                                 end_of_paragraph += 1
                                 current_paragraph = rest_of_line[:end_of_paragraph]
@@ -78,7 +84,10 @@ def paragraph_splitter(text, min_line=0, min_paragraph=0, max_paragraph=False, p
                                 #  the max distance is only relevant for seriously malformed inputs
                                 near_max_whitespace = find_closest_sentence_end(rest_of_line,
                                                                                 max_paragraph,
-                                                                                characters=[' '], max_distance=20)
+                                                                                characters=[' '],
+                                                                                max_left_distance=min_paragraph,
+                                                                                max_right_distance=min_paragraph // 2
+                                                                                )
                                 if near_max_whitespace:
                                     near_max_whitespace += 1
                                     current_paragraph = rest_of_line[:near_max_whitespace]
@@ -89,9 +98,11 @@ def paragraph_splitter(text, min_line=0, min_paragraph=0, max_paragraph=False, p
                                     paragraphs.append(current_paragraph.strip())
                                     current_paragraph = dehyphen(rest_of_line[max_paragraph:])
                     else:  # if there's no sentence ending symbol in the next line, find it at the end of the paragraph
-                        end_of_paragraph = find_closest_sentence_end(current_paragraph,
-                                                                     len(current_paragraph)-1,
-                                                                     max_distance=20)
+                        end_of_paragraph = find_closest_sentence_end(
+                            current_paragraph,
+                            len(current_paragraph)-1,
+                            max_left_distance=len(current_paragraph) - min_paragraph
+                            )
                         if end_of_paragraph > min_paragraph-1:
                             end_of_paragraph += 1
                             new_paragraph = dehyphen(current_paragraph[end_of_paragraph:])
@@ -109,7 +120,9 @@ def paragraph_splitter(text, min_line=0, min_paragraph=0, max_paragraph=False, p
                                 rest_of_line = current_paragraph
                                 near_max_whitespace = find_closest_sentence_end(rest_of_line,
                                                                                 max_paragraph,
-                                                                                characters=[' '], max_distance=20)
+                                                                                characters=[' '],
+                                                                                max_left_distance=min_paragraph,
+                                                                                max_right_distance=min_paragraph // 2)
                                 if near_max_whitespace:
                                     near_max_whitespace += 1
                                     current_paragraph = rest_of_line[:near_max_whitespace]
@@ -190,7 +203,7 @@ def flair_pairs_from_strings(textUnits, n):
 
 
 def find_closest_sentence_end(line, index, characters=['!', '.', '?'],
-                              max_left_distance=False, max_right_distance= false):
+                              max_left_distance=-1, max_right_distance=-1):
     """
     finds the closest sentence ending character in a string, relative to a index position in this string.
     Sentence ending chracters are . ! and ?, if not specified. Another List can be provided.
@@ -208,8 +221,10 @@ def find_closest_sentence_end(line, index, characters=['!', '.', '?'],
         index = len(line)-1
     closest_off = len(line)
     # if there was no max distance defined (so it's false), set it to closest_off.
-    if max_left_distance is False and max_right_distance is False:
-        max_distance = closest_off
+    if max_left_distance < 0:
+        max_left_distance = closest_off
+    if max_right_distance < 0:
+        max_right_distance = closest_off
     closest_position = index
     # before the character there have to be at least two word characters
     # there might also be a closing parenthesis, indicated by \)? <-- zero or one )

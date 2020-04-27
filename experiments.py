@@ -20,6 +20,7 @@ import flair_tests
 from flair.data import Sentence
 from flair.embeddings import BertEmbeddings, DocumentPoolEmbeddings
 import shutil
+from tqdm import tqdm
 
 client = Elasticsearch()
 result_path = './results'
@@ -134,14 +135,17 @@ def get_mlt_results(document_id, index, size=20):
     return result_ids, result_values
 
 
-def es_create_result_csv(name, index_size, index, result_size):
+def es_create_result_csv(name, index_size, index, result_size=20):
     start_time = time.time()
-    es_results = [get_mlt_results(item, index, result_size) for item in range(index_size)]
+    es_results = [get_mlt_results(item, index, result_size) for item in
+                  tqdm(range(index_size), desc=f'creating es results')]
     with open(f'./{name}_es_results.csv', 'w', newline='') as myfile:
         wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
         for line in es_results:
             wr.writerow(line)
+    rankings = [item[0].split() for item in es_results]
     stop_time = time.time() - start_time
+    short_indices = [index for index, ranking in enumerate(rankings) if len(ranking) < result_size]
     with open(f'./datasets/elasticsearch_{name}_timing', 'a') as f:
         f.write(f'time for generating es results for {name}: {stop_time}\n')
     return stop_time
@@ -168,10 +172,17 @@ def generate_faiss_index(batch_size, name, data_location, read_from_file, path=f
         for embedding_number, embeddings in enumerate(generator, start=index_start):
             index_position += batch_size
             if embeddings[0]:
-                id_index.add_with_ids(flair_tests.array_from_list(embeddings[1]),
-                                      np.asarray([j for j in range(index_position,
-                                                                   index_position + batch_size)])
-                                      )
+                if embeddings[0] == 1:
+                    id_index.add_with_ids(flair_tests.array_from_list(embeddings[1]),
+                                          np.asarray([j for j in range(index_position,
+                                                                       index_position + batch_size)])
+                                          )
+                if embeddings[0] == 2:  # here we have reached the end
+                    id_index.add_with_ids(flair_tests.array_from_list(embeddings[1]),
+                                          np.asarray([j for j in range(index_position,
+                                                                       index_position +
+                                                                       len(document_pairs[index_start:]) % batch_size)])
+                                          )
             else:
                 print(f'failed at index {index_position} to {index_position + batch_size}, restarting after that batch')
                 failed_list.append(embeddings[1])
@@ -261,11 +272,10 @@ def generate_embeddings(docs, batch_size, model=document_embeddings, offset=0):
         sentences = [Sentence(sentence)for sentence in docs[-rest:]]
         try:
             model.embed(sentences)
-            print(f'successfully embedded sentences from {-rest} to the end')
-            yield 1, [sentence.get_embedding().detach().cpu().numpy() for sentence in sentences]
+            print(f'successfully embedded sentences from {len(docs) - rest} to the end')
+            yield 2, [sentence.get_embedding().detach().cpu().numpy() for sentence in sentences]
         except RuntimeError:
-            yield 0, (-rest, 0)
-        yield [sentence.get_embedding().detach().cpu().numpy() for sentence in sentences]
+            yield 0, (len(docs) - rest, 0)
 
 
 def wrap_up(old_arguments, failed_list, name, index_name_start, overall_time):
