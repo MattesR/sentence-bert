@@ -15,7 +15,6 @@ def string_to_faiss_embedding(model, string):
     # make a list with a single entry out of the paragraph
     unit_embedding = model.encode([string])
     # cast the embedding to be faiss-compliant
-    # TODO: Make this less messy like for real that's horrible
     unit_embedding = np.array([unit_embedding[0]])
     return unit_embedding
 

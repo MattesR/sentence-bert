@@ -1,9 +1,7 @@
 from flair.embeddings import BertEmbeddings, DocumentPoolEmbeddings
 import faiss
 import numpy as np
-import os
-import experiments
-import torch
+
 
 
 result_path = './results'

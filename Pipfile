@@ -17,6 +17,7 @@ faiss-gpu = "*"
 somajo = "*"
 flair = {editable = true,git = "https://github.com/zalandoresearch/flair.git"}
 rank-bm25 = "*"
+smart-open = "*"
 
 [requires]
 python_version = "3.7"
