@@ -62,21 +62,21 @@ def search_on_disk(path, embedding, k):
     with open(f'{path}/Index Information.txt', 'r') as f:
         for line in f.readlines():
             linesplits = line.split(' ')
-            index_files.append({'name': linesplits[1],
-                                'start': int(linesplits[-3]),
-                                'end': int(linesplits[-1].rstrip())}
-                               )
+            if linesplits[0] == 'Index':
+                index_files.append({'name': linesplits[1],
+                                    'start': int(linesplits[-3]),
+                                    'end': int(linesplits[-1].rstrip())}
+                                   )
     for filename in os.listdir(f'{path}/'):
         if any(i['name'] == filename for i in index_files):
+            print(f'adding results from {filename}')
             id_index = faiss.read_index(f'{path}/{filename}')
             start = id_index.id_map.at(0)
             dist, ids = id_index.search(embedding, k)
             result_heap.add_batch_result(dist, ids, start)
     result_heap.finalize()
-    tuple_ids = tuple(map(tuple, result_heap.I))
-    if len(embedding == 1):
-        tuple_ids = tuple_ids[0]
-    return tuple(id.item() for id in tuple_ids)
+
+    return result_heap.I, result_heap.D
 
 
 

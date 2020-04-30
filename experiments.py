@@ -269,7 +269,7 @@ def generate_embeddings(docs, batch_size, model=document_embeddings, offset=0):
             yield 0, (len(docs) - rest, 0)
 
 
-def create_faiss_csv(name, batch_size=1, k=100):
+def create_faiss_csv(name, batch_size=1000, k=100):
     start_time = time.time()
     index_files = []
     path = f'{faiss_path}/{name}'
@@ -281,23 +281,24 @@ def create_faiss_csv(name, batch_size=1, k=100):
                                 'start': int(line_splits[-3]),
                                 'end': int(line_splits[-1].rstrip())}
                                )
-    all_rankings = []
-    for filename in os.listdir(f'{path}/'):
-        if any(i['name'] == filename for i in index_files):
-            id_index = faiss.read_index(f'{path}/{filename}')
-            size = id_index.id_map.size()
-            start = id_index.id_map.at(0)
-            generator = index_generator(id_index.index, size, batch_size)
-            ranking = []
-            for running_index, batch_set in enumerate(generator):
-                actual_index = start + running_index
-                ranking.append([actual_index, search_on_disk(f'{path}', batch_set, k+1)])
-            all_rankings.append(ranking)
-    with open(f'./{name}_es_results.csv', 'w', newline='') as myfile:
-        wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
-        for ranking in all_rankings:
-            for line in ranking:
-                wr.writerow(line)
+    with open(f'{path}/{name}_faiss_results.csv', 'w', newline='') as csv_file:
+        wr = csv.writer(csv_file, quoting=csv.QUOTE_ALL)
+        for filename in os.listdir(f'{path}/'):
+            if any(i['name'] == filename for i in index_files):
+                id_index = faiss.read_index(f'{path}/{filename}')
+                size = id_index.id_map.size()
+                start = id_index.id_map.at(0)
+                if size > batch_size:
+                    generator = index_generator(id_index.index, size, batch_size)
+                    for running_index, batch_set in tqdm(enumerate(generator), total=size // batch_size,
+                                                         desc=f'evaluating embeddings in {filename}'):
+                        actual_index = start + running_index
+                        ids, dists = search_on_disk(path, batch_set, k+1)
+                        for index, vector in enumerate(ids, start= start):
+                            wr.writerow([index, vector])
+                else:
+                    vectors = id_index.index.reconstruct_n(0, size)
+                    wr.writerow(search_on_disk(path, vectors, k+1))
     stop_time = time.time() - start_time
     with open(f'{path}/Index Information.txt', 'a') as f:
         f.write(f'time for generating faiss csv results for {name}: {stop_time}\n')
@@ -306,9 +307,9 @@ def create_faiss_csv(name, batch_size=1, k=100):
 def index_generator(index, size, batch_size=1):
     rest = size % batch_size
     for i in range(0, size - rest, batch_size):
-        yield index.reconstruct_n(i, i + batch_size)
+        yield index.reconstruct_n(i, batch_size)
     if rest:
-        yield index.reconstruct_n(size-rest-1)
+        yield index.reconstruct_n(size-rest, rest)
 
 
 def wrap_up(old_arguments, failed_list, name, index_name_start, overall_time):
