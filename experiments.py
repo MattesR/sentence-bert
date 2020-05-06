@@ -30,7 +30,7 @@ faiss_path = './faiss_indexes'
 dataset_path = './datasets/generated'
 INDEX_SIZE = 200000
 embedding = BertEmbeddings(layers='-1')
-document_embeddings = DocumentPoolEmbeddings([embedding], fine_tune_mode='nonlinear')
+document_embeddings = DocumentPoolEmbeddings([embedding], fine_tune_mode='none')
 
 
 def create_test_dataset(path, page_size=4, write_name=''):
@@ -155,31 +155,35 @@ def es_create_result_csv(name, index_size, index, result_size=20):
     return stop_time
 
 
-
-
-
-
 def generate_faiss_index(batch_size, name, data_location, read_from_file, path=faiss_path,
-                         index_size=INDEX_SIZE, index_start=0, index_name_start=0,  failed_list=None):
-    #folder creation
-    if not path.endswith(f'/{name}'):
+                         index_size=INDEX_SIZE, index_start=0, index_number=0, failed_list=None, fail_mode=False):
+    print(f'system arguments are: {sys.argv} ')
+    # folder creation
+    if not path.endswith(f'/{name}'):  #
         path += f'/{name}'
-    # if index_name_start is 0, it was started from the user, not frem the script itself.
-    if index_name_start == 0:
+    # if index_number is 0, it was started from the user, not from the script itself.
+    if index_number == 0:
         try:
             os.mkdir(path)
         except FileExistsError:
-            print(f'directory already exists and I am just deleting it. Call the Police, I do not care')
+            print(f'directory already exists and I am just deleting it.')
             shutil.rmtree(path)
             os.mkdir(path)
-    index_information_file = path +'/Index Information.txt'
+    #  creation of index_information file. If it exists, append, if not, write
+    index_information_file = path + '/Index Information.txt'
     if os.path.exists(index_information_file):
         append_write = 'a'
     else:
         append_write = 'w'
+    #  read in the dataset. The dataset is always read completely and spliced afterwards
     document_pairs = get_dataset(data_location, read_from_file, write=f'{name}_dataset')
-    index = faiss.IndexFlatL2(768)
+    # creation of the index and the ID-Map which adds the index
+    # If I change the behavior to include a fail-mode and pick up, from it, read in the current index
+    index = faiss.IndexFlatIP(768)  # Metric InnerProduct
     id_index = faiss.IndexIDMap(index)
+    # creation of the generator for the embeddings. Generates embeddings in batches of batch_size.
+    # it only gets the spliced document_pairs, from which it starts, offset tells the function which embeddings it is
+    # generating. Basically just for the Print, I suppose.
     generator = generate_embeddings(document_pairs[index_start:], batch_size, offset=index_start)
     if not failed_list:
         failed_list = []
@@ -187,46 +191,59 @@ def generate_faiss_index(batch_size, name, data_location, read_from_file, path=f
         with open(failed_list, 'r') as f:
             failed_list = [tuple(map(int, line.split(' '))) for line in f]
     start_time = time.time()
-    index_position = index_start
-    for embedding_number, embeddings in enumerate(generator, start=index_start):
-        if embeddings[0]: # creating embeddings was successful
-            if embeddings[0] == 1: # it was a full set of <batch_size> embeddings
-                id_index.add_with_ids(flair_tests.array_from_list(embeddings[1]),
-                                      np.asarray([j for j in range(index_position,
-                                                                   index_position + batch_size)])
-                                      )
-                index_position += batch_size  # now the next batch gets created, index position moves batch_size forward
-                if index_position - index_start >= index_size:
-                    with open(index_information_file, append_write) as f:
-                        f.write(f'Index {name}_{index_name_start} contains embeddings '
-                                f'from {index_start} to {index_position - 1}\n')
-                    append_write = 'a'
-                    faiss.write_index(id_index, path + f'/{name}_{index_name_start}')
-                    index_name_start += 1
-                    index_start = index_position
-                    index = faiss.IndexFlatL2(768)
-                    id_index = faiss.IndexIDMap(index)
-            if embeddings[0] == 2:  # here we have reached the end
-                id_index.add_with_ids(flair_tests.array_from_list(embeddings[1]),
-                                      np.asarray([j for j in range(index_position,
-                                                                   index_position +
-                                                                   len(document_pairs[index_start:]) % batch_size)])
-                                      )
-                index_position += len(embeddings[1])
+    #  the index position is set to index start and is increased by batch_size (or at the end by however many embeddings
+    #  were left in the generator). It represents the index of the next embeddings which are added.
+    index_position = index_start  # index start is still needed, that's why it's not increased
+    # here we start iterating over all batches in the generator.
+    for batch in generator:
+        if batch[0]:  # creating embeddings was successful
+            # since faiss works with arrays instead of lists, we have to put the embeddings into an array
+            array_vectors = flair_tests.array_from_list(batch[1])
+            # normalization before addition to the index, as mentioned here:
+            # https://github.com/facebookresearch/faiss/wiki/MetricType-and-distances
+            faiss.normalize_L2(array_vectors)
+            # here, we add the generated embeddings to the index. The IDs are given by the current index_position
+            id_index.add_with_ids(array_vectors,
+                                  np.asarray([j for j in range(index_position,
+                                                               index_position + len(batch[1]))])
+                                  )
+            # move index_position further for the number of embeddings added to the index
+            index_position += len(batch[1])
+            # The index is 'full' (has maximum size), if the current position differs more than index_size from the
+            # starting position.
+            # Then, write the index to disk, increment the index_number, give the new index_start_positon, and set
+            # the index_position to index_start position. Afterwards, create a new index and ID_Mapping.
+            if index_position - index_start >= index_size:
+                with open(index_information_file, append_write) as f:
+                    f.write(f'Index {name}_{index_number} contains embeddings '
+                            f'from {index_start} to {index_position - 1}\n')
+                append_write = 'a'
+                faiss.write_index(id_index, path + f'/{name}_{index_number}')
+                index_number += 1
+                index_start = index_position
+                index = faiss.IndexFlatIP(768)
+                id_index = faiss.IndexIDMap(index)
+        # this is what happens, if the generation of embeddings was not successful. The current index is safed to disk.
+        # Then, the script restarts itself with the information on where to resume the generation of embeddings.
+        # Also, the failed list is appended. It is always read at the beginning and rewritten.
         else:
             print(f'failed at index {index_position} to {index_position + batch_size-1}, restarting after that batch')
-            failed_list.append(embeddings[1])
+            # in case of a failure, the second postion of the tuple contains the range of indices of the failed batch
+            failed_list.append(batch[1])
             with open(index_information_file, append_write) as f:
-                f.write(f'Index {name}_interrupt_{index_name_start} contains embeddings '
+                f.write(f'Index {name}_interrupt_{index_number} contains embeddings '
                         f'from {index_start} to {index_position-1}\n')
-            faiss.write_index(id_index, path + f'/{name}_interrupt_{index_name_start}')
-            index_start = embeddings[1][1] + 1
-            print(f'index start is at {index_start}')
+            faiss.write_index(id_index, path + f'/{name}_interrupt_{index_number}')
+            index_start = batch[1][1] + 1  # one after the last index of the failed batch
+            print(f'index start is at {index_start}')  # just to make sure
+            # these are the arguments for restarting the script.
             arglist = ['filename', str(batch_size), name, data_location, str(read_from_file), path,
-                       str(index_size), str(index_start), str(index_name_start),  failed_list]
+                       str(index_size), str(index_start), str(index_number), failed_list]
             overall_time = time.time() - start_time
-            wrap_up(arglist, failed_list, name, index_name_start, overall_time)
+            # function restarts the script and does some maintenance
+            wrap_up(arglist, failed_list, name, index_number, overall_time)
             break
+    # if the index_start is still 0, there was no failure and all embeddings are in one index file
     if index_start == 0:
         faiss.write_index(id_index, path + f'/{name}')
         with open(index_information_file, append_write) as f:
@@ -240,14 +257,23 @@ def generate_faiss_index(batch_size, name, data_location, read_from_file, path=f
     print(f'saved all indices in folder {name}')
     overall_time = time.time() - start_time
     with open(f'{faiss_path}/{name}/stats_before_failure.txt', 'a') as f:
-        f.write(f'timing saving the index {name} {index_name_start}: {overall_time}\n')
-    if failed_list:
-        return failed_list
-    else:
-        return True
+        f.write(f'timing saving the index {name} {index_number}: {overall_time}\n')
+
 
 
 def generate_embeddings(docs, batch_size, model=document_embeddings, offset=0):
+    """
+    Generator function for generating embeddings from strings using a flair model. Takes a list of sentences and
+    returns a list tuple. The first element represents failure (0) or success (1 or 2) and
+    the second element contains a list of embeddings as numpy arrays if successful, and the indices of the failed batch
+    if unsuccessful.
+    The first element is 1, if batch_size embeddings were created
+    :param docs: a list of strings for which embeddings should be created
+    :param batch_size: integer representing how many embeddings should be created at once
+    :param model: the model for creating the embeddings. Defaults to document embeddings using BERT-Base
+    :param offset: the offset of the integers, for printing out the correct index
+    :return: a tuple (success/failure, embeddings/failed_indices)
+    """
     rest = len(docs) % batch_size
     for i in range(0, len(docs) - rest, batch_size):
         sentences = [Sentence(sentence)for sentence in docs[i:i + batch_size]]
@@ -264,7 +290,7 @@ def generate_embeddings(docs, batch_size, model=document_embeddings, offset=0):
         try:
             model.embed(sentences)
             print(f'successfully embedded sentences from {len(docs) + offset - rest} to the end')
-            yield 2, [sentence.get_embedding().detach().cpu().numpy() for sentence in sentences]
+            yield 1, [sentence.get_embedding().detach().cpu().numpy() for sentence in sentences]
         except RuntimeError:
             yield 0, (len(docs) - rest, 0)
 
@@ -281,8 +307,10 @@ def create_faiss_csv(name, batch_size=1000, k=100):
                                 'start': int(line_splits[-3]),
                                 'end': int(line_splits[-1].rstrip())}
                                )
-    with open(f'{path}/{name}_faiss_results.csv', 'w', newline='') as csv_file:
-        wr = csv.writer(csv_file, quoting=csv.QUOTE_ALL)
+    with open(f'{path}/{name}_faiss_results_ids.csv', 'w', newline='') as id_file,\
+            open(f'{path}/{name}_faiss_results_distances.csv', 'w', newline='') as dist_file:
+        wr_id = csv.writer(id_file, quoting=csv.QUOTE_ALL)
+        wr_dist = csv.writer(dist_file, quoting=csv.QUOTE_ALL)
         for filename in os.listdir(f'{path}/'):
             if any(i['name'] == filename for i in index_files):
                 id_index = faiss.read_index(f'{path}/{filename}')
@@ -294,11 +322,15 @@ def create_faiss_csv(name, batch_size=1000, k=100):
                                                          desc=f'evaluating embeddings in {filename}'):
                         actual_index = start + running_index
                         ids, dists = search_on_disk(path, batch_set, k+1)
-                        for index, vector in enumerate(ids, start= start):
-                            wr.writerow([index, vector])
+                        for index, vector in enumerate(ids, start=start):
+                            wr_id.writerow([index, vector])
+                            wr_dist.writerow([index, dists[index- start]])
                 else:
-                    vectors = id_index.index.reconstruct_n(0, size)
-                    wr.writerow(search_on_disk(path, vectors, k+1))
+                    vectors = id_index.index.reconstruct_n(start, size)
+                    ids, dists = search_on_disk(path, vectors, k+1)
+                    for index, vector in enumerate(ids, start=start):
+                        wr_id.writerow([index, vector])
+                        wr_dist.writerow([index, dists[index]])
     stop_time = time.time() - start_time
     with open(f'{path}/Index Information.txt', 'a') as f:
         f.write(f'time for generating faiss csv results for {name}: {stop_time}\n')
@@ -312,9 +344,9 @@ def index_generator(index, size, batch_size=1):
         yield index.reconstruct_n(size-rest, rest)
 
 
-def wrap_up(old_arguments, failed_list, name, index_name_start, overall_time):
+def wrap_up(old_arguments, failed_list, name, index_number, overall_time):
     with open(f'{faiss_path}/{name}/stats_before_failure.txt', 'a') as f:
-        f.write(f'timing when failing at index {index_name_start}: {overall_time}\n')
+        f.write(f'timing when failing at index {index_number}: {overall_time}\n')
     with open(f'{faiss_path}/{name}/failed list.txt', 'w') as f:
         f.write('\n'.join('{} {}'.format(x[0], x[1]) for x in failed_list))
     # the arglist includes all arguments necessary to call this function and pick up where it left.
@@ -326,7 +358,7 @@ def wrap_up(old_arguments, failed_list, name, index_name_start, overall_time):
     if not arglist[4]:
         arglist[3] = f'{name}_dataset'  # the dataset will never be generated. but doesn't need to have that name
     arglist[4] = str(1)
-    arglist[8] = str(index_name_start + 1)
+    arglist[8] = str(index_number + 1)
     arglist[9] = f'{faiss_path}/{name}/failed list.txt'  # the failed list will be loaded
     os.execv(__file__, arglist)
 

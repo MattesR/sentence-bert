@@ -10,9 +10,8 @@ INDEX_SIZE = 200000
 
 # init embedding
 embedding = BertEmbeddings(layers='-1')
-# fine tune mode 'nonlinear' for now, as docs state to use it, if you have "simple word embeddings
-# that are not task-trained
-document_embeddings = DocumentPoolEmbeddings([embedding], fine_tune_mode='nonlinear')
+# mode none, since I do not intend to task train my embeddings
+document_embeddings = DocumentPoolEmbeddings([embedding], fine_tune_mode='none')
 
 
 def embed_all(embedding, sentences):
