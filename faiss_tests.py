@@ -23,6 +23,12 @@ index_size = 200000
 tabulate_headers = ['unit_id', 'content', 'position', 'document_id']
 from util import database as db
 import time
+from flair.data import Sentence
+from flair.embeddings import BertEmbeddings, DocumentPoolEmbeddings
+
+embedding = BertEmbeddings(layers='-1')
+document_embeddings = DocumentPoolEmbeddings([embedding], fine_tune_mode='nonlinear')
+
 
 
 def similarity_from_string(string, k, model=model, faiss_path=faiss_path):
@@ -36,23 +42,51 @@ def similarity_from_string(string, k, model=model, faiss_path=faiss_path):
     print(f' Getting these results took {t_stop - t_start} seconds')
 
 
+def get_ranking(string, k, model=model, faiss_path=faiss_path):
+    t_start = time.time()
+    faiss_embedding = string_to_faiss_embedding(model, string)
+    similarity_ids = search_on_disk(faiss_path, faiss_embedding, k)
+    t_stop = time.time()
+    print(f' Getting these results took {t_stop - t_start} seconds')
+    return similarity_ids
 
-def search_on_disk(path, embedding, k):
+
+def search_on_disk(path, embeddings, k):
     """
-    returns a tuple of ids to look up in the postgres database
+    returns ids and distances from the faiss index stored in the path
+    The path must contain a File called Index Information.txt, which stores the name and start and end points for
+    the index files.
+    :param path: path, where the index files are stored
+    :param embeddings: array of embeddings to search for
+    :param k: k nearest neighbours to search for
     """
-    i = 0
-    result_heap = ResultHeap(nq=len(embedding), k=k)
-    for filename in os.listdir(path):
-        if filename != '.gitignore':
-            index = faiss.read_index(path + '/' + filename)
-            dist, ids = index.search(embedding, k)
-            result_heap.add_batch_result(dist, ids, i * index_size)
+    index_files = []
+    result_heap = ResultHeap(nq=len(embeddings), k=k)
+    with open(f'{path}/Index Information.txt', 'r') as f:
+        for line in f.readlines():
+            linesplits = line.split(' ')
+            if linesplits[0] == 'Index':
+                index_files.append({'name': linesplits[1],
+                                    'start': int(linesplits[-3]),
+                                    'end': int(linesplits[-1].rstrip())}
+                                   )
+    for filename in os.listdir(f'{path}/'):
+        if any(i['name'] == filename for i in index_files):
+            print(f'adding results from {filename}')
+            id_index = faiss.read_index(f'{path}/{filename}')
+            #  start = id_index.id_map.at(0)
+
+            # commenting this out and changing the id0 argument of
+            # result_heap.add_batch_result(dist, ids, start) to zero. I suppose, the id_mapping already takes care
+            # of offsetting the the from the underlying index, so doing it an additional time in the method call
+            # returns a wrong index.
+
+            dist, ids = id_index.search(embeddings, k)
+            result_heap.add_batch_result(dist, ids, 0)
     result_heap.finalize()
-    tuple_ids = tuple(map(tuple, result_heap.I))
-    if len(embedding == 1):
-        tuple_ids = tuple_ids[0]
-    return tuple(id.item() for id in tuple_ids)
+
+    return result_heap.I, result_heap.D
+
 
 
 

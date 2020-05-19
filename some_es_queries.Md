@@ -241,6 +241,8 @@ curl -X GET "localhost:9200/_search?pretty" -H 'Content-Type: application/json' 
 
 
 ### nested query with more like this
+
+
 This nested query will all mails, which contain the word stock. The complete mails with all their text units are returned.  
 This is not what I wanted, but it might proof useful nonetheless.
 ```
@@ -261,3 +263,40 @@ curl -X GET "localhost:9200/enron/_search?pretty" -H 'Content-Type: application/
 }
 '
 ```
+### ordinary mlt
+
+curl -X GET "localhost:9200/_search?pretty" -H 'Content-Type: application/json' -d'
+{
+    "query": {
+        "more_like_this" : {
+            "fields" : ["content"],
+            "like" : 
+            {
+                "_index" : "war_stories",
+                "_id" : "1"
+            },
+            "min_term_freq" : 1,
+            "max_query_terms" : 12
+        }
+    }
+}
+'
+
+curl -X GET "localhost:9200/_search?pretty" -H 'Content-Type: application/json' -d'
+{
+    "query": {
+        "more_like_this" : {
+            "fields" : ["content"],
+            "like" : 
+            {
+                "_index" : "war_stories", 
+                "_id" : "171"
+            },
+            "min_term_freq" : 1,
+            "min_doc_freq" : 1
+        }
+    },
+ "from": 0,
+ "size": 20
+ }
+'

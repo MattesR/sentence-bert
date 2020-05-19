@@ -7,6 +7,7 @@ from elasticsearch_dsl import Search, Index, Document, connections, \
 connections.create_connection(hosts=['localhost:9200'])
 enron_index = Index('enron')
 NSU_index = Index('nsu')
+experiment_index = Index('experiment')
 
 
 def create_index(name):
@@ -109,4 +110,8 @@ class HooverDoc(Document):
     def add_unit(self, content, position):
         self.body.append(
           TextUnit(content=content, position=position))
+
+
+class TestCase(Document):
+    content = Text(term_vector="yes")
 

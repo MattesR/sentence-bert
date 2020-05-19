@@ -8,6 +8,7 @@ from tabulate import tabulate
 client = Elasticsearch()
 tabulate_headers = ['rank', 'content', 'position', 'document_id', 'mlt_score']
 
+
 def create_nested_search(query, index):
     s = Search(using=client, index=index)
     s.source(includes=['*'], excludes=["body"])
@@ -28,12 +29,13 @@ def create_mlt_with_id(document_id,position , index):
                              min_term_freq=1,
                              min_doc_freq=1)
     nested_query = Nested(path='body', inner_hits={}, query=mlt_match)
-    s.query(nested_query)
+    s = s.query(nested_query)
     return s
 
 
 def get_document_via_id(id, index):
     s = Search(using=client, index=index)
+    return s
 
 
 def similarity_search_text(query, index):
