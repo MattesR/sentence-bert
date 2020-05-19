@@ -51,14 +51,17 @@ def get_ranking(string, k, model=model, faiss_path=faiss_path):
     return similarity_ids
 
 
-def search_on_disk(path, embedding, k):
+def search_on_disk(path, embeddings, k):
     """
-    returns a tuple of ids to look up in the postgres database
+    returns ids and distances from the faiss index stored in the path
     The path must contain a File called Index Information.txt, which stores the name and start and end points for
     the index files.
+    :param path: path, where the index files are stored
+    :param embeddings: array of embeddings to search for
+    :param k: k nearest neighbours to search for
     """
     index_files = []
-    result_heap = ResultHeap(nq=len(embedding), k=k)
+    result_heap = ResultHeap(nq=len(embeddings), k=k)
     with open(f'{path}/Index Information.txt', 'r') as f:
         for line in f.readlines():
             linesplits = line.split(' ')
@@ -71,9 +74,15 @@ def search_on_disk(path, embedding, k):
         if any(i['name'] == filename for i in index_files):
             print(f'adding results from {filename}')
             id_index = faiss.read_index(f'{path}/{filename}')
-            start = id_index.id_map.at(0)
-            dist, ids = id_index.search(embedding, k)
-            result_heap.add_batch_result(dist, ids, start)
+            #  start = id_index.id_map.at(0)
+
+            # commenting this out and changing the id0 argument of
+            # result_heap.add_batch_result(dist, ids, start) to zero. I suppose, the id_mapping already takes care
+            # of offsetting the the from the underlying index, so doing it an additional time in the method call
+            # returns a wrong index.
+
+            dist, ids = id_index.search(embeddings, k)
+            result_heap.add_batch_result(dist, ids, 0)
     result_heap.finalize()
 
     return result_heap.I, result_heap.D

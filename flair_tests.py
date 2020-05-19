@@ -8,7 +8,7 @@ result_path = './results'
 faiss_path = './faiss_indexes'
 INDEX_SIZE = 200000
 
-# init embedding
+# init embeddings
 embedding = BertEmbeddings(layers='-1')
 # mode none, since I do not intend to task train my embeddings
 document_embeddings = DocumentPoolEmbeddings([embedding], fine_tune_mode='none')
