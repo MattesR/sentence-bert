@@ -40,7 +40,6 @@ class IndexGenerator:
             self.batch_size = batch_size
         self.name = name
         self.data_location = data_location
-        # initialize
         if not self.path.endswith(f'/{name}'):  #
             self.path += f'/{name}'
         # if index_number is 0, it was started from the user, not from the script itself.
@@ -105,6 +104,7 @@ class IndexGenerator:
                     overall_time = time.time() - start_time
                     self.restart(overall_time)
                     exit(-1)
+            print('leaving fail Mode')
         embedding_generator = generate_embeddings(self.document_pairs[self.index_position:],
                                                   self.batch_size, offset=self.index_position)
         for batch in embedding_generator:
@@ -157,7 +157,7 @@ class IndexGenerator:
     def restart(self, overall_time):
         with open(f'{self.path}/stats_before_failure.txt', 'a') as f:
             f.write(f'timing when failing at index {self.index_number}: {overall_time}\n')
-        with open(f'{self.path}/{self.name}/failed list.txt', 'w') as f:
+        with open(f'{self.path}/failed list.txt', 'w') as f:
             f.write('\n'.join('{} {}'.format(x[0], x[1]) for x in self.failed_list))
         # the arglist includes all arguments necessary to call this function and pick up where it left.
         # the first argument is overwritten by the system as it always holds the filename of the function
@@ -171,7 +171,7 @@ class IndexGenerator:
             # the dataset will never be generated. but doesn't need to have that name
             arglist[3] = f'{self.name}_dataset'
         arglist[4] = str(1)
-        arglist[11] = f'{self.path}/{self.name}/failed list.txt'  # the failed list will be loaded
+        arglist[11] = f'{self.path}/failed list.txt'  # the failed list will be loaded
         os.execv(__file__, arglist)
 
 # if this script is called directly from the command line, it will be because generating faiss index failed.
