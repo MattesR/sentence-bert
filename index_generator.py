@@ -46,11 +46,11 @@ class IndexGenerator:
         # if index_number is 0, it was started from the user, not from the script itself.
         if self.index_number == 0 and not self.fail_mode:
             try:
-                os.mkdir(path)
+                os.mkdir(self.path)
             except FileExistsError:
                 print(f'directory already exists and I am just deleting it.')
-                shutil.rmtree(path)
-                os.mkdir(path)
+                shutil.rmtree(self.path)
+                os.mkdir(self.path)
         #  read in the dataset. The dataset is always read completely and spliced afterwards
         self.document_pairs = get_dataset(data_location, read_from_file, write=f'{name}_dataset')
 
@@ -155,7 +155,7 @@ class IndexGenerator:
             f.write(string)
 
     def restart(self, overall_time):
-        with open(f'{self.path}/{self.name}/stats_before_failure.txt', 'a') as f:
+        with open(f'{self.path}/stats_before_failure.txt', 'a') as f:
             f.write(f'timing when failing at index {self.index_number}: {overall_time}\n')
         with open(f'{self.path}/{self.name}/failed list.txt', 'w') as f:
             f.write('\n'.join('{} {}'.format(x[0], x[1]) for x in self.failed_list))
