@@ -45,16 +45,6 @@ def create_faiss_index(embeddings, name, path=faiss_path, index_size=INDEX_SIZE)
 
 
 
-def array_from_list(list_of_arrays):
-    """
-    gives an array from a list of arrays. they must all have the same length.
-    :param list_of_arrays: the list of arrays .....
-    :return:
-    """
-    shape = list(list_of_arrays[0].shape)
-    shape[:0] = [len(list_of_arrays)]
-    arr = np.concatenate(list_of_arrays).reshape(shape)
-    return arr
 
 
 # if this script is called directly from the command line, it will be because generating faiss index failed.

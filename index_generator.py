@@ -5,8 +5,8 @@ import sys
 import time
 import faiss
 import numpy as np
-import flair_tests
 import shutil
+from util.embeddings import array_from_list
 from experiments import get_dataset
 from experiments import generate_embeddings
 
@@ -19,7 +19,7 @@ DATASET_PATH = './datasets/generated'
 
 class IndexGenerator:
 
-    def __init__(self, batch_size, name, data_location, read_from_file, path=FAISS_PATH,
+    def __init__(self, batch_size, name, data_location, read_from_file, path=FAISS_PATH, model='document_embeddings',
                  index_size=INDEX_SIZE, index_start=0, index_number=0,
                  fail_mode=0, fail_size=0, failed_list=None):
         # make all arguments class fields
@@ -28,6 +28,7 @@ class IndexGenerator:
         else:
             with open(failed_list, 'r') as f:
                 self.failed_list = [tuple(map(int, line.split(' '))) for line in f]
+        self.model = model
         self.fail_size = fail_size
         self.fail_mode = fail_mode
         self.index_number = index_number
@@ -77,7 +78,7 @@ class IndexGenerator:
             # create a embedding_generator witch batch size 1 for as many vectors as needed to be analyzed individually.
             fail_generator = generate_embeddings(self.document_pairs[self.index_position:
                                                                      self.index_position + self.fail_size],
-                                                 1, offset=self.index_position)
+                                                 1, offset=self.index_position, model=self.model)
             # only append the index by pairs.
             pair = []
             for batch in fail_generator:
@@ -106,7 +107,7 @@ class IndexGenerator:
                     exit(-1)
             print('leaving fail Mode')
         embedding_generator = generate_embeddings(self.document_pairs[self.index_position:],
-                                                  self.batch_size, offset=self.index_position)
+                                                  self.batch_size, offset=self.index_position, model=self.model)
         for batch in embedding_generator:
             if batch[0]:
                 self.add_to_index(batch[1])
@@ -125,7 +126,7 @@ class IndexGenerator:
                                      f'from {self.id_index.id_map.at(0)} to {self.index_position - 1}\n')
 
     def add_to_index(self, batch):
-        array_vectors = flair_tests.array_from_list(batch)
+        array_vectors = array_from_list(batch)
         # normalization before addition to the index, as mentioned here:
         # https://github.com/facebookresearch/faiss/wiki/MetricType-and-distanc
         faiss.normalize_L2(array_vectors)
@@ -174,6 +175,7 @@ class IndexGenerator:
         arglist[11] = f'{self.path}/failed list.txt'  # the failed list will be loaded
         os.execv(__file__, arglist)
 
+
 # if this script is called directly from the command line, it will be because generating faiss index failed.
 # the script will automatically recover from a failure by calling itself again and starting where it had to leave off
 # due to failure.
@@ -181,6 +183,6 @@ if __name__ == "__main__":
     print(f'restarting the generation of the embeddings')
     input_args = sys.argv
     generator = IndexGenerator(int(input_args[1]), input_args[2], input_args[3], int(input_args[4]), input_args[5],
-                               int(input_args[6]), int(input_args[7]), int(input_args[8]),
-                               int(input_args[9]), int(input_args[10]), input_args[11])
+                               (input_args[6]), int(input_args[7]), int(input_args[8]),
+                               int(input_args[9]), int(input_args[10]), int(input_args[11]), input_args[12])
     generator.generate_index()

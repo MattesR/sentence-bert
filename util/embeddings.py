@@ -19,6 +19,18 @@ def string_to_faiss_embedding(model, string):
     return unit_embedding
 
 
+def array_from_list(list_of_arrays):
+    """
+    gives an array from a list of arrays. they must all have the same length.
+    :param list_of_arrays: the list of arrays .....
+    :return:
+    """
+    shape = list(list_of_arrays[0].shape)
+    shape[:0] = [len(list_of_arrays)]
+    arr = np.concatenate(list_of_arrays).reshape(shape)
+    return arr
+
+
 class ResultHeap:
     """ Combine query results from a sliced dataset """
 

@@ -22,14 +22,14 @@ from flair.embeddings import BertEmbeddings, DocumentPoolEmbeddings
 import shutil
 from tqdm import tqdm
 from faiss_tests import search_on_disk
+from sentence_transformers import SentenceTransformer
 
 client = Elasticsearch()
 result_path = './results'
 faiss_path = './faiss_indexes'
 dataset_path = './datasets/generated'
 INDEX_SIZE = 1000000
-embedding = BertEmbeddings(layers='-1')
-document_embeddings = DocumentPoolEmbeddings([embedding], fine_tune_mode='none')
+
 
 csv_result_header = ['ranking', 'paragraph', 'distance']
 
@@ -156,7 +156,7 @@ def es_create_result_csv(name, index_size, index, result_size=20):
     return stop_time
 
 
-def generate_embeddings(docs, batch_size, model=document_embeddings, offset=0):
+def generate_embeddings(docs, batch_size, model='document_embeddings', offset=0):
     """
     Generator function for generating embeddings from strings using a flair model. Takes a list of sentences and
     returns a list tuple. The first element represents failure (0) or success (1 or 2) and
@@ -170,24 +170,48 @@ def generate_embeddings(docs, batch_size, model=document_embeddings, offset=0):
     :return: a tuple (success/failure, embeddings/failed_indices)
     """
     rest = len(docs) % batch_size
-    for i in range(0, len(docs) - rest, batch_size):
-        sentences = [Sentence(sentence)for sentence in docs[i:i + batch_size]]
-        try:
-            model.embed(sentences)
-            print(f'successfully embedded sentences {offset + i} to {offset + i + batch_size-1}')
-            yield 1, [sentence.get_embedding().detach().cpu().numpy() for sentence in sentences]
-        except RuntimeError:
-            print(f'could not embed sentences with index {offset + i} '
-                  f'to {offset + i + batch_size-1}\nstoring in failed index list')
-            yield 0, (offset + i, offset + i + batch_size-1)
-    if rest:
-        sentences = [Sentence(sentence)for sentence in docs[-rest:]]
-        try:
-            model.embed(sentences)
-            print(f'successfully embedded sentences from {len(docs) + offset - rest} to the end')
-            yield 1, [sentence.get_embedding().detach().cpu().numpy() for sentence in sentences]
-        except RuntimeError:
-            yield 0, (len(docs) - rest, 0)
+    if model == 'document_embeddings':
+        embedding = BertEmbeddings(layers='-1')
+        model = DocumentPoolEmbeddings([embedding], fine_tune_mode='none')
+        for i in range(0, len(docs) - rest, batch_size):
+            sentences = [Sentence(sentence)for sentence in docs[i:i + batch_size]]
+            try:
+                model.embed(sentences)
+                print(f'successfully embedded sentences {offset + i} to {offset + i + batch_size-1}')
+                yield 1, [sentence.get_embedding().detach().cpu().numpy() for sentence in sentences]
+            except RuntimeError:
+                print(f'could not embed sentences with index {offset + i} '
+                      f'to {offset + i + batch_size-1}\nstoring in failed index list')
+                yield 0, (offset + i, offset + i + batch_size-1)
+        if rest:
+            sentences = [Sentence(sentence)for sentence in docs[-rest:]]
+            try:
+                model.embed(sentences)
+                print(f'successfully embedded sentences from {len(docs) + offset - rest} to the end')
+                yield 1, [sentence.get_embedding().detach().cpu().numpy() for sentence in sentences]
+            except RuntimeError:
+                yield 0, (len(docs) - rest, 0)
+    elif model == 'sentence_bert':
+        model = SentenceTransformer('bert-base-nli-mean-tokens')
+        for i in range(0, len(docs) - rest, batch_size):
+            try:
+                embeddings = model.encode(docs[i:i + batch_size])
+                print(f'successfully embedded sentences {offset + i} to {offset + i + batch_size-1}')
+                yield 1, embeddings
+            except RuntimeError:
+                print(f'could not embed sentences with index {offset + i} '
+                      f'to {offset + i + batch_size-1}\nstoring in failed index list')
+                yield 0, (offset + i, offset + i + batch_size-1)
+        if rest:
+            try:
+                embeddings = model.encode(docs[-rest:])
+                print(f'successfully embedded sentences from {len(docs) + offset - rest} to the end')
+                yield 1, embeddings
+            except RuntimeError:
+                yield 0, (len(docs) - rest, 0)
+    else:
+        raise Exception("No Valid model")
+
 
 
 def create_faiss_csv(name, batch_size=1000, k=100):
