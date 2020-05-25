@@ -78,7 +78,7 @@ def search_on_disk(path, embeddings, k):
 
             # commenting this out and changing the id0 argument of
             # result_heap.add_batch_result(dist, ids, start) to zero. I suppose, the id_mapping already takes care
-            # of offsetting the the from the underlying index, so doing it an additional time in the method call
+            # of offsetting the the from the underlying index, so doing it an additional overall_time in the method call
             # returns a wrong index.
 
             dist, ids = id_index.search(embeddings, k)
