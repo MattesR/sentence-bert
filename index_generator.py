@@ -166,14 +166,12 @@ class IndexGenerator:
         # str(1) is for `read_from_file` as the datasset will never be created on resumption
         # index start will be the first index to generate embeddings for on resumption
         # index name start is
-        arglist = ['filename', str(self.batch_size), self.name, self.data_location, str(self.read_from_file), self.path,
-                   str(self.index_size), str(self.index_start), str(self.index_number), str(self.fail_mode),
-                   str(self.batch_size), self.failed_list]
-        if not arglist[4]:
+        arglist = ['filename', str(self.batch_size), self.name, self.data_location, str(1), self.path,
+                   self.model, str(self.index_size), str(self.index_start), str(self.index_number), str(self.fail_mode),
+                   str(self.batch_size), f'{self.path}/failed list.txt']
+        if not self.read_from_file:
             # the dataset will never be generated. but doesn't need to have that name
             arglist[3] = f'{self.name}_dataset'
-        arglist[4] = str(1)
-        arglist[11] = f'{self.path}/failed list.txt'  # the failed list will be loaded
         os.execv(__file__, arglist)
 
 
