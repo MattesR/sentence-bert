@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 import os
-import sys
 import re
 import time
 import csv
@@ -15,11 +14,8 @@ from elasticsearch.exceptions import NotFoundError, RequestError
 from elasticsearch.helpers import bulk
 from tabulate import tabulate
 import faiss
-import numpy as np
-import flair_tests
 from flair.data import Sentence
 from flair.embeddings import BertEmbeddings, DocumentPoolEmbeddings
-import shutil
 from tqdm import tqdm
 from faiss_tests import search_on_disk
 from sentence_transformers import SentenceTransformer

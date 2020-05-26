@@ -122,8 +122,9 @@ class IndexGenerator:
                 self.restart(overall_time)
                 exit(-1)
         faiss.write_index(self.id_index, self.path + f'/{self.name}_{self.index_number}')
-        self.write_index_information(f'Index {self.name} contains embeddings '
-                                     f'from {self.id_index.id_map.at(0)} to {self.index_position - 1}\n')
+        self.write_index_information(f'Index {self.name}_{self.index_number} contains embeddings '
+                                     f'from {self.id_index.id_map.at(0)} to {self.index_position - 1}\n'
+                                     f'time for finalizing the index: {time.time() - start_time}')
 
     def add_to_index(self, batch):
         array_vectors = array_from_list(batch)
