@@ -3,6 +3,7 @@
 import os
 import sys
 import time
+from datetime import datetime
 import faiss
 import numpy as np
 import shutil
@@ -15,13 +16,16 @@ BATCH_SIZE = 8
 FAISS_PATH = './faiss_indexes'
 INDEX_SIZE = 1000000
 DATASET_PATH = './datasets/generated'
+valid_model_names = ['bert-base-cased', 'bert-base-multilingual-cased', 'roberta-base-openai-detector']
+valid_SentenceBert_model_names = ['bert-base-nli-stsb-mean-tokens', 'roberta-base-nli-stsb-mean-tokens']
+valid_averaging_modes = ['CLS', 'mean', 'SentenceBert']
 
 
 class IndexGenerator:
 
     def __init__(self, batch_size, name, data_location, read_from_file, path=FAISS_PATH, model='document_embeddings',
-                 index_size=INDEX_SIZE, index_start=0, index_number=0,
-                 fail_mode=0, fail_size=0, failed_list=None):
+                 pooling='mean', index_size=INDEX_SIZE, index_start=0, index_number=0,
+                 fail_mode=0, fail_size=0, previous_time=0., failed_list=None):
         # make all arguments class fields
         if not failed_list:
             self.failed_list = []
@@ -29,6 +33,7 @@ class IndexGenerator:
             with open(failed_list, 'r') as f:
                 self.failed_list = [tuple(map(int, line.split(' '))) for line in f]
         self.model = model
+        self.pooling = pooling
         self.fail_size = fail_size
         self.fail_mode = fail_mode
         self.index_number = index_number
@@ -41,6 +46,7 @@ class IndexGenerator:
             self.batch_size = batch_size
         self.name = name
         self.data_location = data_location
+        self.previous_time = previous_time
         if not self.path.endswith(f'/{name}'):  #
             self.path += f'/{name}'
         # if index_number is 0, it was started from the user, not from the script itself.
@@ -51,6 +57,11 @@ class IndexGenerator:
                 print(f'directory already exists and I am just deleting it.')
                 shutil.rmtree(self.path)
                 os.mkdir(self.path)
+            # write basic information into index information File
+            self.write_index_information(f'--- Index Information for Testcase {self.name} ---')
+            self.write_index_information(f'Dataset: {self.data_location}')
+            self.write_index_information(f'Model: {self.model}')
+            self.write_index_information(f'Batch Size : {self.batch_size}')
         #  read in the dataset. The dataset is always read completely and spliced afterwards
         self.document_pairs = get_dataset(data_location, read_from_file, write=f'{name}_dataset')
 
@@ -68,6 +79,8 @@ class IndexGenerator:
                 self.failed_list = [tuple(map(int, line.split(' '))) for line in f]
 
     def generate_index(self):
+        if self.index_number == 0 and not self.fail_mode:
+            self.write_index_information(f'Index Generation started on {datetime.now()}')
         start_time = time.time()
         #  the index position is set to index start and is increased
         #  by batch_size (or at the end by however many embeddings were left in the embedding_generator).
@@ -78,7 +91,7 @@ class IndexGenerator:
             # create a embedding_generator witch batch size 1 for as many vectors as needed to be analyzed individually.
             fail_generator = generate_embeddings(self.document_pairs[self.index_position:
                                                                      self.index_position + self.fail_size],
-                                                 1, offset=self.index_position, model=self.model)
+                                                 1, offset=self.index_position, model=self.model, pooling=self.pooling)
             # only append the index by pairs.
             pair = []
             for batch in fail_generator:
@@ -102,12 +115,13 @@ class IndexGenerator:
                     faiss.write_index(self.id_index, self.path + f'/{self.name}_{self.index_number}')
                     self.index_start = failed_entry[1] + 1
                     print(f'index start is at {self.index_start}')
-                    overall_time = time.time() - start_time
+                    overall_time = time.time() - start_time + self.previous_time
                     self.restart(overall_time)
                     exit(-1)
             print('leaving fail Mode')
         embedding_generator = generate_embeddings(self.document_pairs[self.index_position:],
-                                                  self.batch_size, offset=self.index_position, model=self.model)
+                                                  self.batch_size, offset=self.index_position, model=self.model,
+                                                  pooling=self.pooling)
         for batch in embedding_generator:
             if batch[0]:
                 self.add_to_index(batch[1])
@@ -118,13 +132,24 @@ class IndexGenerator:
                 faiss.write_index(self.id_index, self.path + f'/{self.name}_{self.index_number}')
                 self.index_start = self.index_position  # same as before the failed list, don't step over the batch now!
                 self.fail_mode = 1
-                overall_time = time.time() - start_time
+                overall_time = time.time() - start_time +  self.previous_time
                 self.restart(overall_time)
                 exit(-1)
+        overall_time = time.time() - start_time +  self.previous_time
         faiss.write_index(self.id_index, self.path + f'/{self.name}_{self.index_number}')
         self.write_index_information(f'Index {self.name}_{self.index_number} contains embeddings '
                                      f'from {self.id_index.id_map.at(0)} to {self.index_position - 1}\n'
-                                     f'time for finalizing the index: {time.time() - start_time}')
+                                     f'time for finalizing the index (without module loading): {overall_time}')
+        stop_date_time = datetime.now()
+        self.write_index_information(f'Index Creation stopped at {stop_date_time}')
+        with open(self.path + '/Index Information.txt', 'r') as f:
+            for line in f:
+                if line.startswith('Index Generation started on'):
+                    start_date_string = line[len('Index Generation started on '):]
+                    start_date_string = start_date_string.rstrip()
+                    starte_date_time = datetime.strptime(start_date_string, '%Y-%m-%d %H:%M:%S.%f')
+        self.write_index_information(f'time for finalizing the Index (real total):'
+                                     f' {(stop_date_time-starte_date_time).total_seconds()}')
 
     def add_to_index(self, batch):
         array_vectors = array_from_list(batch)
@@ -154,7 +179,7 @@ class IndexGenerator:
         else:
             append_write = 'w'
         with open(index_information_file, append_write) as f:
-            f.write(string)
+            f.write(string + '\n')
 
     def restart(self, overall_time):
         with open(f'{self.path}/stats_before_failure.txt', 'a') as f:
@@ -167,8 +192,8 @@ class IndexGenerator:
         # index start will be the first index to generate embeddings for on resumption
         # index name start is
         arglist = ['filename', str(self.batch_size), self.name, self.data_location, str(1), self.path,
-                   self.model, str(self.index_size), str(self.index_start), str(self.index_number), str(self.fail_mode),
-                   str(self.batch_size), f'{self.path}/failed list.txt']
+                   self.model,self.pooling, str(self.index_size), str(self.index_start), str(self.index_number),
+                   str(self.fail_mode), str(self.batch_size), str(overall_time), f'{self.path}/failed list.txt']
         if not self.read_from_file:
             # the dataset will never be generated. but doesn't need to have that name
             arglist[3] = f'{self.name}_dataset'
@@ -179,9 +204,25 @@ class IndexGenerator:
 # the script will automatically recover from a failure by calling itself again and starting where it had to leave off
 # due to failure.
 if __name__ == "__main__":
-    print(f'restarting the generation of the embeddings')
-    input_args = sys.argv
-    generator = IndexGenerator(int(input_args[1]), input_args[2], input_args[3], int(input_args[4]), input_args[5],
-                               (input_args[6]), int(input_args[7]), int(input_args[8]),
-                               int(input_args[9]), int(input_args[10]), int(input_args[11]), input_args[12])
+
+    if sys.argv[1] == 'start':
+        if sys.argv[6] not in valid_averaging_modes:
+            print('unknown pooling')
+            exit(-1)
+        if sys.argv[6] == 'SentenceBert' and sys.argv[5] not in valid_SentenceBert_model_names:
+            print(f'{sys.argv[5]} is not a valid SentenceBert Model')
+            exit(-1)
+        if sys.argv[5] not in valid_model_names:
+            print(f'{sys.argv[5]} is not a valid Model for the pooling Strategy: {sys.argv[6]}')
+            exit(-1)
+
+        print(f'Starting Index creation')
+        generator = IndexGenerator(int(sys.argv[2]), sys.argv[3], sys.argv[4], True,
+                                   model=sys.argv[5], pooling=sys.argv[6])
+    else:
+        print(f'restarting the generation of the embeddings')
+        generator = IndexGenerator(int(sys.argv[1]), sys.argv[2], sys.argv[3], int(sys.argv[4]), sys.argv[5],
+                                   sys.argv[6], sys.argv[7], int(sys.argv[8]), int(sys.argv[9]),
+                                   int(sys.argv[10]), int(sys.argv[11]), int(sys.argv[12]), float(sys.argv[13]),
+                                   sys.argv[14])
     generator.generate_index()

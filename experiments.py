@@ -2,8 +2,10 @@
 
 import os
 import re
+import sys
 import time
 import csv
+import statistics
 from util import splitter
 from tika_tests import read_in_documents
 from elasticsearch_dsl import Index, connections, Search
@@ -15,10 +17,11 @@ from elasticsearch.helpers import bulk
 from tabulate import tabulate
 import faiss
 from flair.data import Sentence
-from flair.embeddings import BertEmbeddings, DocumentPoolEmbeddings
+from flair.embeddings import TransformerWordEmbeddings, DocumentPoolEmbeddings, TransformerDocumentEmbeddings
 from tqdm import tqdm
 from faiss_tests import search_on_disk
 from sentence_transformers import SentenceTransformer
+import pandas as pd
 
 client = Elasticsearch()
 result_path = './results'
@@ -131,28 +134,26 @@ def create_mlt_with_id(document_id, index, size=20):
 def get_mlt_results(document_id, index, size=20):
     s = create_mlt_with_id(document_id, index, size=size)
     response = s.execute()
-    result_ids = [int(hit.meta.id) for hit in response]
-    result_values = [int(hit.meta.score) for hit in response]
-    return result_ids, result_values
+    results = [document_id] + [f'{hit.meta.id} ({hit.meta.score})' for hit in response]
+    return results
 
 
-def es_create_result_csv(name, index_size, index, result_size=20):
+def es_create_result_csv(name, index, result_size=20):
     start_time = time.time()
+    index_size = Search(index=index).count()
     es_results = [get_mlt_results(item, index, result_size) for item in
                   tqdm(range(index_size), desc=f'creating es results')]
-    with open(f'./{name}_es_results.csv', 'w', newline='') as myfile:
+    with open(f'{faiss_path}/{name}/search_rankings.csv', 'w', newline='') as myfile:
         wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
         for line in es_results:
             wr.writerow(line)
-    rankings = [item[0].split() for item in es_results]
     stop_time = time.time() - start_time
-    short_indices = [index for index, ranking in enumerate(rankings) if len(ranking) < result_size]
     with open(f'./datasets/elasticsearch_{name}_timing', 'a') as f:
         f.write(f'time for generating es results for {name}: {stop_time}\n')
     return stop_time
 
 
-def generate_embeddings(docs, batch_size, model='document_embeddings', offset=0):
+def generate_embeddings(docs, batch_size, model_name='bert-base-cased', pooling='mean', offset=0):
     """
     Generator function for generating embeddings from strings using a flair model. Takes a list of sentences and
     returns a list tuple. The first element represents failure (0) or success (1 or 2) and
@@ -161,14 +162,19 @@ def generate_embeddings(docs, batch_size, model='document_embeddings', offset=0)
     The first element is 1, if batch_size embeddings were created
     :param docs: a list of strings for which embeddings should be created
     :param batch_size: integer representing how many embeddings should be created at once
-    :param model: the model for creating the embeddings. Defaults to document embeddings using BERT-Base
+    :param model_name: the model for creating the embeddings. Defaults to document embeddings using BERT-Base
+    :param pooling: the pooling strategy to generate Document Embeddings
     :param offset: the offset of the integers, for printing out the correct index
     :return: a tuple (success/failure, embeddings/failed_indices)
     """
     rest = len(docs) % batch_size
-    if model == 'document_embeddings':
-        embedding = BertEmbeddings(layers='-1')
+    model = False
+    if pooling == 'document_embeddings':
+        embedding = TransformerWordEmbeddings(model_name, layers='-1')
         model = DocumentPoolEmbeddings([embedding], fine_tune_mode='none')
+    elif pooling == 'CLS':
+        model = TransformerDocumentEmbeddings(model_name)
+    if model:
         for i in range(0, len(docs) - rest, batch_size):
             sentences = [Sentence(sentence)for sentence in docs[i:i + batch_size]]
             try:
@@ -187,8 +193,8 @@ def generate_embeddings(docs, batch_size, model='document_embeddings', offset=0)
                 yield 1, [sentence.get_embedding().detach().cpu().numpy() for sentence in sentences]
             except RuntimeError:
                 yield 0, (len(docs) - rest, 0)
-    elif model == 'sentence_bert':
-        model = SentenceTransformer('bert-base-nli-mean-tokens')
+    if pooling == 'SentenceBert':
+        model = SentenceTransformer(model_name)
         for i in range(0, len(docs) - rest, batch_size):
             try:
                 embeddings = model.encode(docs[i:i + batch_size])
@@ -279,3 +285,78 @@ def get_total_time(timing_file):
             test = re.split(': ', line)
             total_time += float(test[1])
     return total_time
+
+
+def split_rank(cell):
+    split_cell = cell.split('(')
+    rank = int(split_cell[0])  # splitting at the parenthesis, the first string in the list is the rank
+    # splitting at the parenthesis, the second string is the value but with an added
+    # closing parenthesis
+    score = float(split_cell[1][:-1])
+    return rank, score  # returns a tuple of rank and score
+
+
+def evaluate_rankings(name):
+    with open(f'{faiss_path}/{name}/search_rankings.csv', 'r', newline='') as rankings_file:
+        with open(f'{faiss_path}/{name}/search_evaluation.csv', 'w+', newline='') as results_file:
+            csv_reader = csv.reader(rankings_file, delimiter=',')
+            csv_writer = csv.writer(results_file)
+            csv_writer.writerow(['search_id', 'target_pair_ranking', 'average_score_total', 'median_score_total',
+                                'average_score_top_ten', 'median_score_top_ten', 'close_to_pair_hits_total',
+                                 'close_to_pair_hits_top_ten', 'score_distance_total', 'score_distance_top_ten',
+                                 'biggest_score_drop'])
+            for row in csv_reader:
+                search_id = split_rank(row[1])[0]
+                if search_id % 2:  # if the id is odd, the target ID is the one below
+                    target_pair_id = search_id - 1
+                else:  # otherwise it is the one above
+                    target_pair_id = search_id + 1
+                # convert all results into id and score
+                results = [split_rank(cell) for cell in row[2:]]
+                ranks, values = zip(*results)
+                if target_pair_id in ranks:
+                    target_pair_ranking = ranks.index(target_pair_id) + 1
+                else:
+                    target_pair_ranking = 201
+                average_score_total = statistics.mean(values)
+                median_score_total = statistics.median(values)
+                average_score_top_ten = statistics.mean(values[:10])
+                median_score_top_ten = statistics.median(values[:10])
+                close_to_pair_start = target_pair_id - target_pair_id % 2 - 10
+                #  these are the indices of the 10 closest pairs over/under the evaluated pair
+                close_to_pair_range = [i for i in range(close_to_pair_start, close_to_pair_start + 10)] +\
+                                      [i for i in range(close_to_pair_start + 12, close_to_pair_start + 22)]
+                close_to_pair_hits_total = sum(value in ranks for value in close_to_pair_range)
+                close_to_pair_hits_top_ten = sum(value in ranks for value in close_to_pair_range[:10])
+                score_distance_total = values[0] - values[-1]
+                if len(values) >= 10:
+                    score_distance_top_ten = values[0] - values[9]
+                else:
+                    score_distance_top_ten = score_distance_total
+                biggest_score_drop = max(abs(element - values[index-1])
+                                         for index, element in enumerate(values[1:], start=1))
+                row_results = [search_id, target_pair_ranking, average_score_total, median_score_total,
+                               average_score_top_ten, median_score_top_ten, close_to_pair_hits_total,
+                               close_to_pair_hits_top_ten, score_distance_total, score_distance_top_ten,
+                               biggest_score_drop]
+                csv_writer.writerow(row_results)
+    results_spreadsheet = pd.read_csv(f'{faiss_path}/{name}/search_evaluation.csv')
+    description = results_spreadsheet.describe()
+    description.to_csv(f'{faiss_path}/{name}/results_description.csv')
+    rank_counts = results_spreadsheet.groupby('target_pair_ranking').count()['search_id']
+    rank_counts.to_csv(f'{faiss_path}/{name}/rank_counts.csv')
+    no_finders = results_spreadsheet[results_spreadsheet.target_pair_ranking == 201]
+    no_finders.to_csv(f'{faiss_path}/{name}/no_finders.csv')
+    no_finders_description = no_finders.describe()
+    no_finders_description.to_csv(f'{faiss_path}/{name}/no_finders_description.csv')
+    finders = results_spreadsheet[results_spreadsheet.target_pair_ranking != 201]
+    finders.to_csv(f'{faiss_path}/{name}/finders.csv')
+    finders_description = finders.describe()
+    finders_description.to_csv(f'{faiss_path}/{name}/finders_description.csv')
+
+
+if __name__ == "__main__":
+    print(f'generating results for {sys.argv[1]}')
+
+
+
