@@ -113,5 +113,6 @@ class HooverDoc(Document):
 
 
 class TestCase(Document):
-    content = Text(term_vector="yes")
+    content = Text(term_vector="yes", analyzer='stop')
+
 

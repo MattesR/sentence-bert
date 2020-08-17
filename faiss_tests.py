@@ -65,7 +65,7 @@ def search_on_disk(path, embeddings, k):
     with open(f'{path}/Index Information.txt', 'r') as f:
         for line in f.readlines():
             linesplits = line.split(' ')
-            if linesplits[0] == 'Index':
+            if linesplits[0] == 'Index' and linesplits[2] == 'contains':
                 index_files.append({'name': linesplits[1],
                                     'start': int(linesplits[-3]),
                                     'end': int(linesplits[-1].rstrip())}

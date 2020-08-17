@@ -2,13 +2,15 @@
 
 import os
 import re
+import shutil
 import sys
 import time
 import csv
 import statistics
+from collections import Counter
 from util import splitter
 from tika_tests import read_in_documents
-from elasticsearch_dsl import Index, connections, Search
+from elasticsearch_dsl import Index, connections, Search, MultiSearch
 from elasticsearch_dsl.query import MoreLikeThis
 from elastic import TestCase
 from elasticsearch import Elasticsearch
@@ -22,9 +24,15 @@ from tqdm import tqdm
 from faiss_tests import search_on_disk
 from sentence_transformers import SentenceTransformer
 import pandas as pd
+import matplotlib
+# Force matplotlib to not use any Xwindows backend.
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+
 
 client = Elasticsearch()
 result_path = './results'
+qual_path = './qualitative analysis'
 faiss_path = './faiss_indexes'
 dataset_path = './datasets/generated'
 INDEX_SIZE = 1000000
@@ -66,6 +74,12 @@ def get_dataset(data_location, read_from_file, page_size=4, write=''):
     else:
         flat_pairs = create_test_dataset(data_location, page_size, write_name=write)
     return flat_pairs
+
+def get_document_by_Id(data_location, read_from_file, id):
+    dataset = get_dataset(data_location, read_from_file)
+    return dataset[id]
+
+
 
 
 def delete_es_index(name):
@@ -117,14 +131,16 @@ def create_mlt_with_id(document_id, index, size=20):
                                  like={'_index': index, '_id': document_id},
                                  min_term_freq=1,
                                  min_doc_freq=1,
-                                 minimum_should_match='5%')
+                                 minimum_should_match='5%',
+                                 analyzer='stop'
+                                 )
     else:
         like_list = [{'_index': index, '_id': item} for item in document_id]
         mlt_match = MoreLikeThis(fields=["content"],
                                  like=like_list,
                                  min_term_freq=1,
                                  min_doc_freq=1,
-
+                                 analyzer='stop'
                                  )
     s = s.query(mlt_match)
     s = s[:size]
@@ -138,11 +154,52 @@ def get_mlt_results(document_id, index, size=20):
     return results
 
 
+def es_create_result_csv_bulk(name, index, result_size=200, batch_size=1000):
+    start_time = time.time()
+    index_size = Search(index=index).count()
+    rest = index_size % batch_size
+    results = []
+    for i in range(0, index_size - rest, batch_size):
+        multisearch = MultiSearch(index=index)
+        print(f'generating results number {i} to {i + batch_size}')
+        for item in range(i, i + batch_size):
+            multisearch = multisearch.add(create_mlt_with_id(item, index, result_size))
+        responses = multisearch.execute()
+        for index_id, response in enumerate(responses, start=i):
+            results.append([str(index_id)] + [f'{hit.meta.id} ({hit.meta.score})' for hit in response])
+    if rest:
+        multisearch = MultiSearch(index=index)
+        for i in range(index_size-rest, index_size):
+            multisearch = multisearch.add(create_mlt_with_id(item, index, result_size))
+        responses = multisearch.execute()
+        for index_id, response in enumerate(responses, start=i):
+            results.append([str(index_id)] + [f'{hit.meta.id} ({hit.meta.score})' for hit in response])
+    try:
+        os.mkdir(f'{faiss_path}/{name}/')
+    except FileExistsError:
+        print(f'directory already exists and I am just deleting it.')
+        shutil.rmtree(f'{faiss_path}/{name}/')
+        os.mkdir(f'{faiss_path}/{name}/')
+    with open(f'{faiss_path}/{name}/search_rankings.csv', 'w', newline='') as myfile:
+        wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
+        for line in results:
+            wr.writerow(line)
+    stop_time = time.time() - start_time
+    with open(f'./datasets/elasticsearch_{name}_timing', 'a') as f:
+        f.write(f'time for generating es results for {name}: {stop_time}\n')
+    return stop_time
+
 def es_create_result_csv(name, index, result_size=20):
     start_time = time.time()
     index_size = Search(index=index).count()
     es_results = [get_mlt_results(item, index, result_size) for item in
                   tqdm(range(index_size), desc=f'creating es results')]
+    try:
+        os.mkdir(f'{faiss_path}/{name}/')
+    except FileExistsError:
+        print(f'directory already exists and I am just deleting it.')
+        shutil.rmtree(f'{faiss_path}/{name}/')
+        os.mkdir(f'{faiss_path}/{name}/')
     with open(f'{faiss_path}/{name}/search_rankings.csv', 'w', newline='') as myfile:
         wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
         for line in es_results:
@@ -169,8 +226,8 @@ def generate_embeddings(docs, batch_size, model_name='bert-base-cased', pooling=
     """
     rest = len(docs) % batch_size
     model = False
-    if pooling == 'document_embeddings':
-        embedding = TransformerWordEmbeddings(model_name, layers='-1')
+    if pooling == 'mean':
+        embedding = TransformerWordEmbeddings(model_name, layers='-1', allow_long_sentences=True)
         model = DocumentPoolEmbeddings([embedding], fine_tune_mode='none')
     elif pooling == 'CLS':
         model = TransformerDocumentEmbeddings(model_name)
@@ -193,7 +250,7 @@ def generate_embeddings(docs, batch_size, model_name='bert-base-cased', pooling=
                 yield 1, [sentence.get_embedding().detach().cpu().numpy() for sentence in sentences]
             except RuntimeError:
                 yield 0, (len(docs) - rest, 0)
-    if pooling == 'SentenceBert':
+    elif pooling == 'SentenceBert':
         model = SentenceTransformer(model_name)
         for i in range(0, len(docs) - rest, batch_size):
             try:
@@ -215,7 +272,6 @@ def generate_embeddings(docs, batch_size, model_name='bert-base-cased', pooling=
         raise Exception("No Valid model")
 
 
-
 def create_faiss_csv(name, batch_size=1000, k=100):
     start_time = time.time()
     index_files = []
@@ -223,7 +279,7 @@ def create_faiss_csv(name, batch_size=1000, k=100):
     with open(f'{path}/Index Information.txt', 'r') as f:
         for line in f.readlines():
             line_splits = line.split(' ')
-            if line_splits[0] == 'Index':
+            if line_splits[0] == 'Index' and line_splits[2] == 'contains':
                 index_files.append({'name': line_splits[1],
                                     'start': int(line_splits[-3]),
                                     'end': int(line_splits[-1].rstrip())}
@@ -238,7 +294,7 @@ def create_faiss_csv(name, batch_size=1000, k=100):
                 if size > batch_size:
                     generator = index_generator(id_index.index, size, batch_size)
                     for batch_number, batch_set in tqdm(enumerate(generator), total=size // batch_size,
-                                                         desc=f'evaluating embeddings in {filename}'):
+                                                        desc=f'evaluating embeddings in {filename}'):
                         ids, dists = search_on_disk(path, batch_set, k+1)
                         batch_index_start = batch_number * batch_size + start
                         for index, vector in enumerate(ids):
@@ -250,7 +306,8 @@ def create_faiss_csv(name, batch_size=1000, k=100):
                     ids, dists = search_on_disk(path, vectors, k+1)
                     for index, vector in enumerate(ids, start=start):
                         wr_id.writerow([str(index)] +
-                                       [f"{entry} ({dists[index-start]})" for entry in vector])
+                                       [f"{entry} ({dists[index-start][entry_index]})"
+                                        for entry_index, entry in enumerate(vector)])
     stop_time = time.time() - start_time
     with open(f'{path}/Index Information.txt', 'a') as f:
         f.write(f'time for generating faiss csv results for {name}: {stop_time}\n')
@@ -264,18 +321,18 @@ def index_generator(index, size, batch_size=1):
         yield index.reconstruct_n(size-rest, rest)
 
 
-def search_csv(csv_file, dataset, index, result_size):
+def search_csv(csv_file, dataset, index, result_size=10):
     string_dataset = get_dataset(dataset, 1)
+    text_results = [string_dataset[index]]
     table_results = [['queried index', string_dataset[index], 0]]
     with open(csv_file, 'r', newline='') as id_file:
         csv_reader = csv.reader(id_file, delimiter=',')
-        for line in csv_reader:
-            if int(line[0]) == index:
-                ranking_indexes = [int(cell.split(' ')[0]) for cell in line[1:]]
-                distances = [float(cell.split(' ')[1].strip('()')) for cell in line[1:result_size]]
-                for ranking_number, ranking_index in enumerate(ranking_indexes, start=1):
-                    table_results.append([ranking_number, string_dataset[ranking_index], distances[ranking_number-1]])
-    print(tabulate(table_results, headers=csv_result_header))
+        for run_index, line in enumerate(csv_reader):
+            if run_index == index:
+                results = [split_rank(cell) for cell in line[2:]]
+                ranks, values = zip(*results)
+                text_results = [string_dataset[rank] for rank in (index,) + ranks[:result_size]]
+                return text_results,  (index,) + ranks[:result_size]
 
 
 def get_total_time(timing_file):
@@ -355,8 +412,191 @@ def evaluate_rankings(name):
     finders_description.to_csv(f'{faiss_path}/{name}/finders_description.csv')
 
 
+def compare_models(dataset_name):
+    plt.rcParams.update({'axes.titlesize': 'large'})
+    with open(f'{faiss_path}/master_thesis_results/{dataset_name}_es/search_rankings.csv', 'r') as es_data:
+        csv_reader = csv.reader(es_data, delimiter=',')
+        all_es_ranks = []
+        for row in csv_reader:
+            results = [split_rank(cell) for cell in row[1:]]
+            ranks, values = zip(*results)
+            all_es_ranks.append(ranks)
+    for filename in os.listdir(f'{faiss_path}/master_thesis_results'):
+        model_name = filename.split('_')[-1]
+        if filename.startswith(dataset_name):
+            co_occurence = []
+            top_10_from_es_count = []
+            top_10_from_model_count = []
+            no_finders = 0
+            with open(f'{faiss_path}/master_thesis_results/{filename}/search_rankings.csv', 'r') as model_data:
+                csv_reader = csv.reader(model_data, delimiter=',')
+                for index, row in tqdm(enumerate(csv_reader), desc=f'creating co occurences for {filename}'):
+                    results = [split_rank(cell) for cell in row[2:]]
+                    ranks, values = zip(*results)
+                    co_occurence.append(sum(all_es_ranks[index].count(item) for item in ranks))
+                    top_10_from_es_count.append(sum(ranks.count(item) for item in all_es_ranks[index][:10]))
+                    top_10_from_model_count.append(sum(all_es_ranks[index].count(item) for item in ranks[:10]))
+                all_counts = Counter(co_occurence)
+                average_co_occurrence = statistics.mean(co_occurence)
+                average_top_10_from_es = statistics.mean(top_10_from_es_count)
+                average_top_10_from_model = statistics.mean(top_10_from_model_count)
+                std_es = statistics.stdev(top_10_from_es_count)
+                std_model = statistics.stdev(top_10_from_model_count)
+                standard_deviation = statistics.stdev(co_occurence)
+                plt.grid(color='gray', linestyle='dashed')
+                plt.xlim(0, 145)
+                plt.bar(all_counts.keys(), all_counts.values(), 1.0, color='b')
+                plt.rc('xtick', labelsize=8)
+                plt.rc('ytick', labelsize=8)
+                plt.xlabel('number of occurrences [-]', fontsize=20)
+                plt.ylabel('co-occurrences [-]', fontsize=20)
+                plt.title(f' {model_name} ', fontsize=20)
+
+                plt.axvline(average_co_occurrence, color='k', linestyle='dashed', linewidth=1)
+                min_ylim, max_ylim = plt.ylim()
+                plt.text(average_co_occurrence * 1.1, max_ylim * 0.9,
+                         f'Mean: {statistics.mean(co_occurence):.2f}')
+                plt.savefig(f'{faiss_path}/master_thesis_results/{filename}/'
+                            f'{filename[len(dataset_name)+1:]}_co_occurrence_plot.pdf',
+                            bbox_inches='tight')
+                plt.clf()
+                # find the indices of the five documents with highest and lowest co-occurences each.
+                top_5_indices = sorted(range(len(co_occurence)), key=lambda i: co_occurence[i])[-5:]
+                bottom_5_indices = sorted(range(len(co_occurence)), key=lambda i: co_occurence[i])[:5]
+                top_5_with_values = [(index, co_occurence[index]) for index in top_5_indices]
+                bottom_5_with_values = [(index, co_occurence[index]) for index in bottom_5_indices]
+            with open(f'{faiss_path}/master_thesis_results/{filename}/co-occurence.csv', 'w') as csv_file:
+                csv_writer = csv.writer(csv_file)
+                csv_writer.writerow(['Average Co-occurrence', average_co_occurrence])
+                csv_writer.writerow(['standard_deviation', standard_deviation])
+                csv_writer.writerow(['top five indices (and Values)'] +
+                                    [f'{item[0]} ({item[1]})' for item in top_5_with_values])
+                csv_writer.writerow(['bottom five (and Values)'] +
+                                    [f'{item[0]} ({item[1]})' for item in bottom_5_with_values])
+                csv_writer.writerow(['Average top ten co-occurrence in elastic', average_top_10_from_model])
+                csv_writer.writerow(['standard_deviation top 10 from model in es', std_model])
+                csv_writer.writerow(['Average top ten co-occurrence in model', average_top_10_from_es])
+                csv_writer.writerow(['standard_deviation top ten from es in model', std_es])
+
+
+def compare_models_top_ten(dataset_name):
+    with open(f'{faiss_path}/master_thesis_results/{dataset_name}_es/search_rankings.csv', 'r') as es_data:
+        csv_reader = csv.reader(es_data, delimiter=',')
+        all_es_ranks = []
+        for row in csv_reader:
+            results = [split_rank(cell) for cell in row[1:11]]
+            ranks, values = zip(*results)
+            all_es_ranks.append(ranks)
+            not_found =[]
+    for filename in os.listdir(f'{faiss_path}/master_thesis_results'):
+        model_name = filename.split('_')[-1]
+        if filename.startswith(dataset_name):
+            co_occurence = []
+            with open(f'{faiss_path}/master_thesis_results/{filename}/search_rankings.csv', 'r') as model_data:
+                csv_reader = csv.reader(model_data, delimiter=',')
+                for index, row in tqdm(enumerate(csv_reader), desc=f'creating co occurences for {filename}'):
+                    results = [split_rank(cell) for cell in row[2:12]]
+                    ranks, values = zip(*results)
+                    co_oc_count = sum(all_es_ranks[index].count(item) for item in ranks)
+                    co_occurence.append(co_oc_count)
+                    if not co_oc_count:
+                        not_found.append(index)
+                all_counts = Counter(co_occurence)
+                average_co_occurrence = statistics.mean(co_occurence)
+                standard_deviation = statistics.stdev(co_occurence)
+                plt.grid(color='gray', linestyle='dashed')
+                plt.xlim(0, 10)
+                plt.bar(all_counts.keys(), all_counts.values(), 1.0, color='b')
+                plt.rc('xtick', labelsize=8)
+                plt.rc('ytick', labelsize=8)
+                plt.xlabel('number of occurrences [-]', fontsize=20)
+                plt.ylabel('co-occurrences [-]', fontsize=20)
+                plt.title(f' {model_name} ', fontsize=20)
+
+                plt.axvline(average_co_occurrence, color='k', linestyle='dashed', linewidth=1)
+                min_ylim, max_ylim = plt.ylim()
+                plt.text(average_co_occurrence * 1.1, max_ylim * 0.9,
+                         f'Mean: {statistics.mean(co_occurence):.2f}')
+                plt.savefig(f'{faiss_path}/master_thesis_results/{filename}/'
+                            f'{filename[len(dataset_name)+1:]}_co_occurrence_plot_10.pdf',
+                            bbox_inches='tight')
+                plt.clf()
+                # find the indices of the five documents with highest and lowest co-occurences each.
+                top_5_indices = sorted(range(len(co_occurence)), key=lambda i: co_occurence[i])[-5:]
+                bottom_5_indices = sorted(range(len(co_occurence)), key=lambda i: co_occurence[i])[:5]
+                top_5_with_values = [(index, co_occurence[index]) for index in top_5_indices]
+                bottom_5_with_values = [(index, co_occurence[index]) for index in bottom_5_indices]
+            with open(f'{faiss_path}/master_thesis_results/{filename}/co-occurence_10.csv', 'w') as csv_file:
+                csv_writer = csv.writer(csv_file)
+                csv_writer.writerow(['Average Co-occurrence', average_co_occurrence])
+                csv_writer.writerow(['standard_deviation', standard_deviation])
+                csv_writer.writerow(['top five indices (and Values)'] +
+                                    [f'{item[0]} ({item[1]})' for item in top_5_with_values])
+                csv_writer.writerow(['bottom five (and Values)'] +
+                                    [f'{item[0]} ({item[1]})' for item in bottom_5_with_values])
+            with open(f'{faiss_path}/master_thesis_results/{filename}/no_co-oc_in_top_10', 'w') as not_found_file:
+                for no_finder in not_found:
+                    not_found_file.write(f'{no_finder}\n')
+
+
+
+
+def get_ranking_data(dataset_name):
+    pair_rankings = []
+    for filename in os.listdir(f'{faiss_path}/master_thesis_results'):
+        if filename.startswith(dataset_name):
+            model_data = pd.read_csv(f'{faiss_path}/master_thesis_results/{filename}/finders.csv')
+            pair_rankings.append([filename, model_data['target_pair_ranking']])
+    return pair_rankings
+
+
+def create_qual_analysis(dataset_name, id, top_x=10):
+    save_path = f'{qual_path}/{dataset_name}_{id}'
+    try:
+        os.mkdir(save_path)
+    except FileExistsError:
+        print(f'directory already exists and I am just deleting it.')
+        shutil.rmtree(save_path)
+        os.mkdir(save_path)
+    dataset = get_dataset(dataset_name, 1)
+    for filename in os.listdir(f'{faiss_path}/master_thesis_results'):
+        if filename.startswith(dataset_name):
+            query_document = dataset[id]
+            if id % 2:
+                target_document_id = id - 1
+            else:
+                target_document_id = id + 1
+            target_document = dataset[target_document_id]
+            str_results, ranks = search_csv(
+                f'{faiss_path}/master_thesis_results/{filename}/search_rankings.csv',
+                dataset_name, id, top_x)
+            with open(f'{save_path}/{filename[len(dataset_name)+1:]}.txt', 'w') as textfile:
+                textfile.write(f'-- analysis from {filename} -- \n')
+                textfile.write(f'-- Query Document ({id}) -- \n')
+                textfile.write(query_document + '\n\n')
+                textfile.write(f'-- Target Document ({target_document_id}) -- \n')
+                textfile.write(target_document + '\n\n')
+                textfile.write(f'-- Ranking results (with ID) -- \n')
+                for rank, text in enumerate(str_results[1:], start=1):
+                    textfile.write(f'{rank}: ({ranks[rank]}):\n')
+                    textfile.write(text + '\n\n')
+
+
+
+
+
+
+
+
 if __name__ == "__main__":
     print(f'generating results for {sys.argv[1]}')
+    create_faiss_csv(sys.argv[1], int(sys.argv[2]), int(sys.argv[3]))
+    print(f'Evaluating results for {sys.argv[1]}')
+    evaluate_rankings(sys.argv[1])
+    print(f'moving everything to the external drive')
+    shutil.move(f'{faiss_path}/{sys.argv[1]}', f'{faiss_path}/master_thesis_results')
+
+
 
 
 

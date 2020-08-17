@@ -16,8 +16,11 @@ BATCH_SIZE = 8
 FAISS_PATH = './faiss_indexes'
 INDEX_SIZE = 1000000
 DATASET_PATH = './datasets/generated'
-valid_model_names = ['bert-base-cased', 'bert-base-multilingual-cased', 'roberta-base-openai-detector']
-valid_SentenceBert_model_names = ['bert-base-nli-stsb-mean-tokens', 'roberta-base-nli-stsb-mean-tokens']
+valid_model_names = ['bert-base-uncased', 'bert-base-cased', 'bert-base-multilingual-cased',
+                     'roberta-base-openai-detector', 'bert-base-german-dbmdz-uncased', 'bert-base-german-dbmdz-cased',
+                     'bert-base-multilingual-uncased']
+valid_SentenceBert_model_names = ['bert-base-nli-stsb-mean-tokens', 'roberta-base-nli-stsb-mean-tokens',
+                                  'distiluse-base-multilingual-cased']
 valid_averaging_modes = ['CLS', 'mean', 'SentenceBert']
 
 
@@ -70,7 +73,10 @@ class IndexGenerator:
         if self.fail_mode:
             self.id_index = faiss.read_index(f'{path}/{name}_{index_number}')
         else:
-            self.index = faiss.IndexFlatIP(768)  # Metric InnerProduct
+            if not self.model == 'distiluse-base-multilingual-cased':
+                self.index = faiss.IndexFlatIP(768)  # Metric InnerProduct
+            else:
+                self.index = faiss.IndexFlatIP(512)  # Metric InnerProduct
             self.id_index = faiss.IndexIDMap(self.index)
         if not failed_list:
             self.failed_list = []
@@ -86,12 +92,12 @@ class IndexGenerator:
         #  by batch_size (or at the end by however many embeddings were left in the embedding_generator).
         #  It represents the index of the next embeddings which are added.
         # here we start iterating over all batches in the embedding_generator.
-        if self.fail_mode == 1:
+        if self.fail_mode == 1 and self.batch_size < 1:
             # print('I am in Fail Mode! <3')
             # create a embedding_generator witch batch size 1 for as many vectors as needed to be analyzed individually.
             fail_generator = generate_embeddings(self.document_pairs[self.index_position:
                                                                      self.index_position + self.fail_size],
-                                                 1, offset=self.index_position, model=self.model, pooling=self.pooling)
+                                                 1, offset=self.index_position, model_name=self.model, pooling=self.pooling)
             # only append the index by pairs.
             pair = []
             for batch in fail_generator:
@@ -120,7 +126,7 @@ class IndexGenerator:
                     exit(-1)
             print('leaving fail Mode')
         embedding_generator = generate_embeddings(self.document_pairs[self.index_position:],
-                                                  self.batch_size, offset=self.index_position, model=self.model,
+                                                  self.batch_size, offset=self.index_position, model_name=self.model,
                                                   pooling=self.pooling)
         for batch in embedding_generator:
             if batch[0]:
@@ -130,12 +136,12 @@ class IndexGenerator:
                       f'retrying that batch in fail_mode')
                 self.failed_list.append(batch[1])
                 faiss.write_index(self.id_index, self.path + f'/{self.name}_{self.index_number}')
-                self.index_start = self.index_position  # same as before the failed list, don't step over the batch now!
+                self.index_start = self.index_position # same as before the failed list, don't step over the batch now!
                 self.fail_mode = 1
-                overall_time = time.time() - start_time +  self.previous_time
+                overall_time = time.time() - start_time + self.previous_time
                 self.restart(overall_time)
                 exit(-1)
-        overall_time = time.time() - start_time +  self.previous_time
+        overall_time = time.time() - start_time + self.previous_time
         faiss.write_index(self.id_index, self.path + f'/{self.name}_{self.index_number}')
         self.write_index_information(f'Index {self.name}_{self.index_number} contains embeddings '
                                      f'from {self.id_index.id_map.at(0)} to {self.index_position - 1}\n'
@@ -204,21 +210,22 @@ class IndexGenerator:
 # the script will automatically recover from a failure by calling itself again and starting where it had to leave off
 # due to failure.
 if __name__ == "__main__":
-
+    print(sys.argv)
     if sys.argv[1] == 'start':
-        if sys.argv[6] not in valid_averaging_modes:
+        if sys.argv[5] not in valid_averaging_modes:
             print('unknown pooling')
             exit(-1)
-        if sys.argv[6] == 'SentenceBert' and sys.argv[5] not in valid_SentenceBert_model_names:
-            print(f'{sys.argv[5]} is not a valid SentenceBert Model')
-            exit(-1)
-        if sys.argv[5] not in valid_model_names:
-            print(f'{sys.argv[5]} is not a valid Model for the pooling Strategy: {sys.argv[6]}')
+        if sys.argv[5] == 'SentenceBert':
+            if sys.argv[6] not in valid_SentenceBert_model_names:
+                print(f'{sys.argv[6]} is not a valid SentenceBert Model')
+                exit(-1)
+        elif sys.argv[6] not in valid_model_names:
+            print(f'{sys.argv[6]} is not a valid Model for the pooling Strategy: {sys.argv[5]}')
             exit(-1)
 
         print(f'Starting Index creation')
         generator = IndexGenerator(int(sys.argv[2]), sys.argv[3], sys.argv[4], True,
-                                   model=sys.argv[5], pooling=sys.argv[6])
+                                   model=sys.argv[6], pooling=sys.argv[5])
     else:
         print(f'restarting the generation of the embeddings')
         generator = IndexGenerator(int(sys.argv[1]), sys.argv[2], sys.argv[3], int(sys.argv[4]), sys.argv[5],
